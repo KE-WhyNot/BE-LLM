@@ -1,0 +1,41 @@
+# GitHub 이슈가 닫혔을 때 실행될 워크플로우의 이름
+name: Close Jira issue
+
+# 워크플로우 실행 조건: issues 이벤트 중 'closed' 타입일 때
+on:
+  issues:
+    types:
+      - closed
+
+# 실행될 작업 정의
+jobs:
+  close-issue-in-jira:
+    name: Close Jira issue
+    runs-on: ubuntu-latest 
+
+    steps:
+      # 1. Jira 로그인
+      - name: Login to Jira
+        uses: atlassian/gajira-login@v3
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+
+      # 2. GitHub 이슈 제목에서 Jira 이슈 키 추출
+      - name: Extract Jira issue key from GitHub issue title
+        id: extract-key
+        run: |
+          # 이슈 제목에서 'PRJ-123' 같은 형식의 Jira 키를 찾습니다.
+          # '|| true'를 추가하여 Jira 키를 찾지 못해도 오류로 중단되지 않도록 합니다.
+          JIRA_KEY=$(echo "${{ github.event.issue.title }}" | grep -oE '[A-Z]+-[0-9]+' || true)
+          echo "JIRA_KEY=$JIRA_KEY" >> $GITHUB_ENV
+
+      # 3. Jira 이슈 상태를 '완료'로 변경
+      # 위 스텝에서 JIRA_KEY를 성공적으로 찾았을 경우에만 실행됩니다.
+      - name: Transition Jira issue to Done
+        if: env.JIRA_KEY != ''
+        uses: atlassian/gajira-transition@v3
+        with:
+          issue: ${{ env.JIRA_KEY }}
+          transition: "완료"
