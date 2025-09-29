@@ -2,3 +2,4 @@
 /build/
 /src/main/resources/secret/
 /.gradle/
+/.env

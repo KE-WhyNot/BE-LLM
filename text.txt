@@ -1,0 +1,13 @@
+/app
+  ├── __init__.py
+  ├── main.py             # FastAPI 앱 실행 및 전체 설정
+  ├── database.py         # 데이터베이스 연결 설정
+  ├── routers/
+  │   ├── __init__.py
+  │   └── chat.py         # 채팅 관련 API 엔드포인트
+  ├── services/
+  │   ├── __init__.py
+  │   └── chatbot_service.py # 실제 챗봇 로직 (RAG, Webhook 처리)
+  └── schemas/
+      ├── __init__.py
+      └── chat_schema.py    # API 요청/응답 데이터 형식 정의
