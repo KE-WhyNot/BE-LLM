@@ -100,28 +100,92 @@ class FinancialRAGService:
         except Exception as e:
             return {"error": f"데이터 가져오기 실패: {str(e)}"}
     
+    def _extract_stock_symbols(self, query: str) -> List[str]:
+        """질문에서 주식명을 추출하여 심볼로 변환"""
+        # 주요 한국 주식 매핑
+        stock_mapping = {
+            # 삼성 관련
+            "삼성": ["005930.KS", "SSNLF"],
+            "삼성전자": ["005930.KS", "SSNLF"],
+            "samsung": ["005930.KS", "SSNLF"],
+            
+            # 하이닉스 관련
+            "하이닉스": ["000660.KS", "HXSCL"],
+            "sk하이닉스": ["000660.KS", "HXSCL"],
+            "hynix": ["000660.KS", "HXSCL"],
+            
+            # LG 관련
+            "lg": ["003550.KS", "LPLIY"],
+            "lg전자": ["003550.KS", "LPLIY"],
+            "lg화학": ["051910.KS", "LGCHEM"],
+            
+            # 네이버 관련
+            "네이버": ["035420.KS", "NHNCF"],
+            "naver": ["035420.KS", "NHNCF"],
+            
+            # 카카오 관련
+            "카카오": ["035720.KS", "KAKAO"],
+            "kakao": ["035720.KS", "KAKAO"],
+            
+            # 현대차 관련
+            "현대차": ["005380.KS", "HYMTF"],
+            "현대자동차": ["005380.KS", "HYMTF"],
+            "hyundai": ["005380.KS", "HYMTF"],
+            
+            # 기아 관련
+            "기아": ["000270.KS", "KIMTF"],
+            "kia": ["000270.KS", "KIMTF"],
+            
+            # SK텔레콤 관련
+            "sk텔레콤": ["017670.KS", "SKM"],
+            "sktelecom": ["017670.KS", "SKM"],
+            
+            # POSCO 관련
+            "포스코": ["005490.KS", "PKX"],
+            "posco": ["005490.KS", "PKX"],
+            
+            # 시장 지수
+            "코스피": ["^KS11"],
+            "kospi": ["^KS11"],
+            "코스닥": ["^KQ11"],
+            "kosdaq": ["^KQ11"],
+            "나스닥": ["^IXIC"],
+            "nasdaq": ["^IXIC"],
+            "다우": ["^DJI"],
+            "dow": ["^DJI"],
+            "s&p500": ["^GSPC"],
+            "sp500": ["^GSPC"]
+        }
+        
+        found_symbols = []
+        query_lower = query.lower()
+        
+        for keyword, symbols in stock_mapping.items():
+            if keyword in query_lower:
+                found_symbols.extend(symbols)
+        
+        return found_symbols
+
     def get_financial_news(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """Yahoo Finance RSS에서 실제 금융 뉴스 가져오기"""
         news_list = []
         
         try:
             import feedparser
+            from datetime import datetime
             
-            # 쿼리에 따른 RSS URL 선택
+            # 질문에서 주식 심볼 자동 추출
+            stock_symbols = self._extract_stock_symbols(query)
+            
+            # RSS URL 생성
             rss_urls = []
-            
-            if "삼성" in query or "samsung" in query.lower():
-                rss_urls = [
-                    "https://feeds.finance.yahoo.com/rss/2.0/headline?s=005930.KS&region=US&lang=en-US",
-                    "https://feeds.finance.yahoo.com/rss/2.0/headline?s=SSNLF&region=US&lang=en-US"
-                ]
-            elif "kospi" in query.lower() or "코스피" in query:
-                rss_urls = [
-                    "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^KS11&region=US&lang=en-US",
-                    "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US"
-                ]
+            if stock_symbols:
+                print(f"🔍 감지된 주식 심볼: {stock_symbols}")
+                for symbol in stock_symbols:
+                    rss_urls.append(f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US")
             else:
                 # 일반적인 금융 뉴스
+                print("📰 일반 금융 뉴스 검색")
                 rss_urls = [
                     "https://feeds.finance.yahoo.com/rss/2.0/headline",
                     "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US"
@@ -140,15 +204,28 @@ class FinancialRAGService:
                         title = entry.get('title', '').strip()
                         summary = entry.get('summary', '').strip()
                         link = entry.get('link', '').strip()
-                        published = entry.get('published', datetime.now().isoformat())
+                        published_raw = entry.get('published', datetime.now().isoformat())
+                        
+                        # 날짜 형식 변환 (날짜만 표시)
+                        try:
+                            if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                                published_date = datetime(*entry.published_parsed[:6]).strftime('%Y-%m-%d')
+                            else:
+                                published_date = datetime.now().strftime('%Y-%m-%d')
+                        except:
+                            published_date = datetime.now().strftime('%Y-%m-%d')
                         
                         # 유효한 뉴스인지 확인
                         if title and len(title) > 5 and link:
+                            # 뉴스 분석 및 영향도 예측
+                            impact_analysis = self._analyze_news_impact(title, summary)
+                            
                             news_list.append({
                                 "title": title,
                                 "summary": summary if summary else f"Yahoo Finance: {title}",
                                 "url": link,
-                                "published": published
+                                "published": published_date,
+                                "impact_analysis": impact_analysis
                             })
                     
                 except Exception as e:
@@ -175,6 +252,60 @@ class FinancialRAGService:
                     "published": datetime.now().isoformat()
                 }
             ][:max_results]
+    
+    def _analyze_news_impact(self, title: str, summary: str) -> Dict[str, Any]:
+        """뉴스의 시장 영향도 분석"""
+        try:
+            # 긍정/부정 키워드 분석
+            positive_keywords = [
+                '상승', '증가', '성장', '호재', '긍정', '개선', '확대', '투자', '매수',
+                'rise', 'increase', 'growth', 'positive', 'improve', 'expand', 'buy'
+            ]
+            negative_keywords = [
+                '하락', '감소', '위험', '악재', '부정', '악화', '축소', '매도', '손실',
+                'fall', 'decrease', 'risk', 'negative', 'worse', 'reduce', 'sell', 'loss'
+            ]
+            
+            text = (title + " " + summary).lower()
+            
+            positive_count = sum(1 for keyword in positive_keywords if keyword in text)
+            negative_count = sum(1 for keyword in negative_keywords if keyword in text)
+            
+            # 영향도 점수 계산
+            if positive_count > negative_count:
+                impact_score = min(positive_count * 20, 100)
+                impact_direction = "긍정적"
+            elif negative_count > positive_count:
+                impact_score = min(negative_count * 20, 100)
+                impact_direction = "부정적"
+            else:
+                impact_score = 50
+                impact_direction = "중립적"
+            
+            # 시장 영향도 예측
+            if impact_score >= 80:
+                market_impact = "높음 - 주가에 큰 영향 예상"
+            elif impact_score >= 60:
+                market_impact = "중간 - 주가에 적당한 영향 예상"
+            else:
+                market_impact = "낮음 - 주가에 미미한 영향 예상"
+            
+            return {
+                "impact_score": impact_score,
+                "impact_direction": impact_direction,
+                "market_impact": market_impact,
+                "positive_keywords": positive_count,
+                "negative_keywords": negative_count
+            }
+            
+        except Exception as e:
+            return {
+                "impact_score": 50,
+                "impact_direction": "중립적",
+                "market_impact": "분석 불가",
+                "positive_keywords": 0,
+                "negative_keywords": 0
+            }
     
     def get_news_content_from_url(self, url: str) -> Dict[str, Any]:
         """뉴스 URL에서 실제 내용을 스크래핑"""
