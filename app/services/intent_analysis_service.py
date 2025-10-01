@@ -40,8 +40,8 @@ class IntentAnalysisService:
                 "stock price", "stock info", "samsung", "stock symbol", "price", "current price"
             ],
             "news_query": [
-                "뉴스", "최신 뉴스", "뉴스 분석", "동향", "소식", "이슈", "최근", "최근 동향", "최근 소식",
-                "news", "latest news", "news analysis", "trend", "issue", "recent", "recent trend"
+                "뉴스", "최신 뉴스", "뉴스 분석", "동향", "소식", "이슈", "최근", "최근 동향", "최근 소식", "전망"
+                "news", "latest news", "news analysis", "trend", "issue", "recent", "recent trend", "outlook"
             ],
             "investment_strategy": [
                 "투자 전략", "투자 방법", "포트폴리오", "자산 배분", "투자 조언", "추천", "전략", "방법",
