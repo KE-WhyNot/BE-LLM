@@ -1,26 +1,27 @@
 from typing import Dict, Any, Optional
 from datetime import datetime
-from app.services.financial_agent import financial_agent
 from app.services.financial_workflow import financial_workflow
 from app.services.monitoring_service import monitoring_service
 from app.services.knowledge_base_service import knowledge_base_service
+from app.services.intent_analysis_service import IntentAnalysisService
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 
 class FinancialChatbotService:
     """금융 전문가 챗봇 서비스"""
     
     def __init__(self):
-        self.financial_agent = financial_agent
         self.financial_workflow = financial_workflow
         self.monitoring_service = monitoring_service
         self.knowledge_base_service = knowledge_base_service
+        self.intent_analyzer = IntentAnalysisService()
         self._initialize_services()
     
     def _initialize_services(self):
         """서비스 초기화"""
         try:
             # 지식 베이스 구축
-            self.knowledge_base_service.create_comprehensive_knowledge_base()
+            # 실제 구현된 메서드로 정정
+            self.knowledge_base_service.build_from_data_directory()
             print("금융 전문가 챗봇 서비스가 초기화되었습니다.")
         except Exception as e:
             print(f"서비스 초기화 중 오류: {e}")
@@ -36,21 +37,14 @@ class FinancialChatbotService:
             if not user_message:
                 return self._create_error_response("메시지를 입력해주세요.")
             
-            # 복잡한 쿼리인지 판단
-            is_complex_query = self._is_complex_query(user_message)
+            # 의도 분석 일원화
+            intent_analysis = self.intent_analyzer.analyze_intent(user_message)
             
-            if is_complex_query:
-                # LangGraph 워크플로우 사용
-                result = self.financial_workflow.process_query(
-                    user_message, 
-                    user_id=request.user_id
-                )
-            else:
-                # LangChain 에이전트 사용
-                result = self.financial_agent.chat(
-                    user_message, 
-                    user_id=request.user_id
-                )
+            # LangGraph 워크플로우로 일원화 라우팅 (내부에서 타입 분류 수행)
+            result = self.financial_workflow.process_query(
+                user_message,
+                user_id=request.user_id
+            )
             
             # 응답 시간 계산
             processing_time = (datetime.now() - start_time).total_seconds()
@@ -63,8 +57,9 @@ class FinancialChatbotService:
                     "user_id": request.user_id,
                     "session_id": request.session_id,
                     "processing_time": processing_time,
-                    "is_complex_query": is_complex_query,
-                    "success": result["success"]
+                    "success": result["success"],
+                    "intent": intent_analysis.get("intent"),
+                    "confidence": float(intent_analysis.get("confidence", 0.0))
                 }
             )
             
@@ -118,7 +113,8 @@ class FinancialChatbotService:
     def get_conversation_history(self, session_id: str) -> list:
         """대화 기록 조회"""
         try:
-            return self.financial_agent.get_conversation_history()
+            # 워크플로우 경로로 일원화되어 별도 대화 기록 저장소가 없습니다.
+            return []
         except Exception as e:
             print(f"대화 기록 조회 실패: {e}")
             return []
@@ -126,7 +122,8 @@ class FinancialChatbotService:
     def clear_conversation_history(self, session_id: str):
         """대화 기록 초기화"""
         try:
-            self.financial_agent.clear_memory()
+            # 워크플로우 경로에서는 초기화할 대화 기록이 없습니다.
+            return None
         except Exception as e:
             print(f"대화 기록 초기화 실패: {e}")
     

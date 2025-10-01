@@ -8,12 +8,7 @@ from langchain.prompts import ChatPromptTemplate
 from datetime import datetime
 import json
 from app.services.rag_service import rag_service
-from app.services.financial_agent import (
-    FinancialDataTool, 
-    FinancialKnowledgeTool, 
-    FinancialNewsTool, 
-    FinancialAnalysisTool
-)
+from app.services.formatters import stock_data_formatter, news_formatter, analysis_formatter
 from app.config import settings
 
 class FinancialWorkflowState(TypedDict):
@@ -39,17 +34,18 @@ class FinancialWorkflowService:
     
     def _initialize_llm(self):
         """LLM 초기화"""
-        if settings.openai_api_key:
+        # Google Gemini 우선 사용
+        if settings.google_api_key:
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash-exp",
+                temperature=0.1,
+                google_api_key=settings.google_api_key
+            )
+        elif settings.openai_api_key:
             return ChatOpenAI(
                 model="gpt-4",
                 temperature=0.1,
                 api_key=settings.openai_api_key
-            )
-        elif settings.google_api_key:
-            return ChatGoogleGenerativeAI(
-                model="gemini-pro",
-                temperature=0.1,
-                google_api_key=settings.google_api_key
             )
         else:
             # API 키가 없을 때는 더미 LLM 반환 (테스트용)
@@ -57,13 +53,9 @@ class FinancialWorkflowService:
             return None
     
     def _create_tools(self):
-        """도구들 생성"""
-        return [
-            FinancialDataTool(),
-            FinancialKnowledgeTool(),
-            FinancialNewsTool(),
-            FinancialAnalysisTool()
-        ]
+        """도구들 생성 - 공용 포맷터 사용"""
+        # LangGraph 워크플로우에서는 직접 도구를 사용하지 않고 포맷터를 사용
+        return []
     
     def _create_workflow(self):
         """LangGraph 워크플로우 생성"""
@@ -91,7 +83,7 @@ class FinancialWorkflowService:
             self._route_after_classification,
             {
                 "data": "get_financial_data",
-                "analysis": "analyze_data", 
+                "analysis": "get_financial_data",  # analysis도 먼저 데이터 조회
                 "news": "get_news",
                 "knowledge": "search_knowledge",
                 "general": "generate_response",
@@ -120,25 +112,97 @@ class FinancialWorkflowService:
         return workflow.compile()
     
     def _classify_query(self, state: FinancialWorkflowState) -> FinancialWorkflowState:
-        """사용자 쿼리 분류"""
-        query = state["user_query"].lower()
+        """사용자 쿼리 분류 (LLM 기반)"""
+        query = state["user_query"]
         
-        # 키워드 기반 분류
-        if any(keyword in query for keyword in ["주가", "가격", "현재가", "시세", "005930", "삼성전자"]):
-            query_type = "data"
-        elif any(keyword in query for keyword in ["분석", "전망", "투자", "추천", "의견"]):
-            query_type = "analysis"
-        elif any(keyword in query for keyword in ["뉴스", "소식", "이슈", "공시"]):
-            query_type = "news"
-        elif any(keyword in query for keyword in ["뜻", "이해", "설명", "기본", "원리"]):
-            query_type = "knowledge"
+        # LLM을 사용한 의도 분류
+        if self.llm:
+            query_type = self._classify_with_llm(query)
         else:
-            query_type = "general"
+            # LLM이 없을 때는 키워드 기반 폴백
+            query_type = self._classify_with_keywords(query)
         
         state["query_type"] = query_type
         state["next_step"] = query_type
         
         return state
+    
+    def _classify_with_llm(self, query: str) -> str:
+        """LLM을 사용한 의도 분류"""
+        try:
+            classification_prompt = f"""당신은 금융 챗봇의 의도 분류 전문가입니다.
+사용자의 질문을 분석하여 아래 5가지 카테고리 중 하나로 분류하세요.
+
+카테고리:
+1. data - 주식 가격, 시세, 현재가 등 실시간 데이터 조회
+2. analysis - 주식 분석, 투자 전망, 추천 등 분석 요청
+3. news - 뉴스, 소식, 동향, 이슈 등 뉴스 조회
+4. knowledge - 금융 용어 설명, 개념 이해, 기본 원리 등 지식 질문
+5. general - 일반적인 인사, 기타 질문
+
+사용자 질문: "{query}"
+
+반드시 위 5개 중 하나만 출력하세요. 설명 없이 카테고리 이름만 출력하세요.
+출력 형식: data 또는 analysis 또는 news 또는 knowledge 또는 general"""
+
+            response = self.llm.invoke(classification_prompt)
+            
+            # 응답에서 카테고리 추출
+            result = response.content.strip().lower()
+            
+            # 유효한 카테고리인지 확인
+            valid_types = ["data", "analysis", "news", "knowledge", "general"]
+            for valid_type in valid_types:
+                if valid_type in result:
+                    return valid_type
+            
+            # 유효하지 않으면 키워드 기반 폴백
+            return self._classify_with_keywords(query)
+            
+        except Exception as e:
+            print(f"LLM 분류 중 오류: {e}")
+            return self._classify_with_keywords(query)
+    
+    def _classify_with_keywords(self, query: str) -> str:
+        """키워드 기반 분류 (폴백)"""
+        query_lower = query.lower()
+        
+        # 주식 종목명 리스트
+        stock_names = [
+            "삼성전자", "sk하이닉스", "하이닉스", "네이버", "카카오", "현대차", "기아",
+            "lg전자", "삼성바이오", "포스코", "sk텔레콤", "삼성sdi",
+            "samsung", "hynix", "naver", "kakao", "hyundai", "kia"
+        ]
+        
+        # 종목명이 포함되어 있는지 확인
+        has_stock_name = any(stock in query_lower for stock in stock_names)
+        
+        # 1순위: 명확한 키워드
+        if any(keyword in query_lower for keyword in ["주가", "가격", "현재가", "시세"]):
+            return "data"
+        elif any(keyword in query_lower for keyword in ["뉴스", "소식", "이슈", "공시"]):
+            return "news"
+        elif any(keyword in query_lower for keyword in ["뜻", "이해", "설명", "의미", "무엇", "뭐야"]):
+            return "knowledge"
+        
+        # 2순위: 종목명 + 분석/투자 키워드 = analysis
+        elif has_stock_name and any(keyword in query_lower for keyword in ["분석", "전망", "투자", "추천", "의견", "전략"]):
+            return "analysis"
+        
+        # 3순위: 종목명 + 주식 = data
+        elif has_stock_name and "주식" in query_lower:
+            return "data"
+        
+        # 4순위: 종목명만 있으면 data
+        elif has_stock_name:
+            return "data"
+        
+        # 5순위: 분석/투자 키워드만 있으면 general (종목 없음)
+        elif any(keyword in query_lower for keyword in ["분석", "전망", "투자", "추천", "전략"]):
+            return "general"
+        
+        else:
+            return "general"
     
     def _route_after_classification(self, state: FinancialWorkflowState) -> str:
         """분류 후 라우팅"""
@@ -259,28 +323,34 @@ class FinancialWorkflowService:
             
             if query_type == "data" and "financial_data" in state:
                 data = state["financial_data"]
-                response_parts.append(f"📊 {data['company_name']} ({data.get('symbol', 'N/A')}) 실시간 정보")
-                response_parts.append(f"현재가: {data['current_price']:,}원")
-                response_parts.append(f"전일대비: {data['price_change']:+,}원 ({data['price_change_percent']:+.2f}%)")
-                response_parts.append(f"거래량: {data['volume']:,}주")
+                if data and "error" not in data:
+                    symbol = data.get('symbol', 'N/A')
+                    response_parts.append(stock_data_formatter.format_stock_data(data, symbol))
+                else:
+                    response_parts.append("죄송합니다. 주식 데이터를 가져올 수 없습니다. 종목명을 다시 확인해주세요.")
                 
-            elif query_type == "analysis" and "analysis_result" in state:
-                response_parts.append("🔍 투자 분석 결과:")
-                response_parts.append(state["analysis_result"])
+            elif query_type == "analysis" and "financial_data" in state:
+                data = state["financial_data"]
+                if data and "error" not in data:
+                    symbol = data.get('symbol', 'N/A')
+                    response_parts.append(analysis_formatter.format_stock_analysis(data, symbol))
+                else:
+                    response_parts.append("죄송합니다. 분석할 주식 데이터를 가져올 수 없습니다. 종목명을 다시 확인해주세요.")
                 
             elif query_type == "news" and "news_data" in state:
                 news = state["news_data"]
                 if news:
-                    response_parts.append("📰 최신 뉴스:")
-                    for i, article in enumerate(news[:3], 1):
-                        response_parts.append(f"{i}. {article['title']}")
-                        response_parts.append(f"   {article['summary']}")
+                    response_parts.append(news_formatter.format_news_list(news))
                 else:
-                    response_parts.append("관련 뉴스를 찾을 수 없습니다.")
+                    response_parts.append("죄송합니다. 관련 뉴스를 찾을 수 없습니다. 다른 키워드로 시도해보세요.")
                     
             elif query_type == "knowledge" and "knowledge_context" in state:
-                response_parts.append("📚 금융 지식:")
-                response_parts.append(state["knowledge_context"])
+                context = state["knowledge_context"]
+                if context and context.strip():
+                    response_parts.append("📚 금융 지식:")
+                    response_parts.append(context)
+                else:
+                    response_parts.append("죄송합니다. 관련 지식 정보를 찾을 수 없습니다. 다른 질문으로 시도해보세요.")
                 
             else:
                 # 일반적인 질문에 대한 응답
@@ -292,7 +362,14 @@ class FinancialWorkflowService:
             if query_type in ["data", "analysis"]:
                 response_parts.append("\n⚠️ 주의사항: 이 정보는 참고용이며, 투자 결정은 신중히 하시기 바랍니다.")
             
-            state["final_response"] = "\n".join(response_parts)
+            # 최종 응답 생성
+            final_response = "\n".join(response_parts)
+            
+            # 빈 응답 방지 폴백
+            if not final_response or len(final_response.strip()) < 10:
+                final_response = "죄송합니다. 요청하신 정보를 처리할 수 없습니다. 다른 질문으로 시도해보세요."
+            
+            state["final_response"] = final_response
             state["next_step"] = "end"
             
         except Exception as e:
@@ -312,31 +389,78 @@ class FinancialWorkflowService:
         """쿼리에서 주식 심볼 추출"""
         query_lower = query.lower()
         
+        # 띄어쓰기 제거 (예: "현대 차" -> "현대차")
+        query_no_space = query.replace(" ", "")
+        query_lower_no_space = query_lower.replace(" ", "")
+        
         # 한국 주식 심볼 매핑 (한글은 원본 유지, 영문은 소문자)
         symbol_mapping = {
             "삼성전자": "005930.KS",
             "samsung": "005930.KS",
             "sk하이닉스": "000660.KS",
+            "하이닉스": "000660.KS",
             "sk hynix": "000660.KS",
+            "skhynix": "000660.KS",
+            "hynix": "000660.KS",
             "naver": "035420.KS",
             "네이버": "035420.KS",
+            "kakao": "035720.KS",
+            "카카오": "035720.KS",
+            "현대차": "005380.KS",
+            "현대자동차": "005380.KS",
+            "hyundai": "005380.KS",
+            "기아": "000270.KS",
+            "kia": "000270.KS",
+            "lg전자": "066570.KS",
+            "lg": "066570.KS",
+            "포스코": "005490.KS",
+            "posco": "005490.KS",
+            "sk텔레콤": "017670.KS",
+            "sk텔레콤": "017670.KS",
             "삼성바이오로직스": "207940.KS",
+            "삼성바이오": "207940.KS",
             "samsung biologics": "207940.KS",
             "삼성sdi": "006400.KS",
             "samsung sdi": "006400.KS"
         }
         
-        # 원본 쿼리와 소문자 쿼리 모두에서 검색
+        # 원본 쿼리, 소문자 쿼리, 띄어쓰기 제거 쿼리 모두에서 검색
         for keyword, symbol in symbol_mapping.items():
-            if keyword in query or keyword in query_lower:
+            if (keyword in query or keyword in query_lower or 
+                keyword in query_no_space or keyword in query_lower_no_space):
                 return symbol
         
-        # 직접적인 심볼 패턴 검색
+        # 직접적인 심볼 패턴 검색 (개선)
         import re
-        symbol_pattern = r'\b\d{6}\.KS\b'
-        match = re.search(symbol_pattern, query)
+        
+        # 1. 완전한 심볼 패턴 (예: 005930.KS)
+        full_symbol_pattern = r'\b\d{6}\.KS\b'
+        match = re.search(full_symbol_pattern, query)
         if match:
             return match.group()
+        
+        # 2. 6자리 숫자만 있는 경우 (예: 005930)
+        number_pattern = r'\b(\d{6})\b'
+        match = re.search(number_pattern, query)
+        if match:
+            number = match.group(1)
+            # 주요 한국 주식 심볼 매핑
+            number_mapping = {
+                "005930": "005930.KS",  # 삼성전자
+                "000660": "000660.KS",  # SK하이닉스
+                "035420": "035420.KS",  # 네이버
+                "207940": "207940.KS",  # 삼성바이오로직스
+                "006400": "006400.KS",  # 삼성SDI
+                "005380": "005380.KS",  # 현대차
+                "000270": "000270.KS",  # 기아
+                "017670": "017670.KS",  # SK텔레콤
+                "005490": "005490.KS",  # POSCO
+            }
+            if number in number_mapping:
+                return number_mapping[number]
+            else:
+                # 알려지지 않은 번호도 .KS 추가
+                return f"{number}.KS"
         
         return ""
     
