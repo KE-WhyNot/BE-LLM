@@ -15,6 +15,23 @@ class FinancialDataFormatter:
         if "error" in data:
             return f"오류: {data['error']}"
         
+        # 52주 최고/최저가 정보
+        week_52_info = ""
+        if data.get('52week_high', 'Unknown') != 'Unknown' and data.get('52week_low', 'Unknown') != 'Unknown':
+            week_52_info = f"\n- 52주 최고가: {data['52week_high']:,}원\n- 52주 최저가: {data['52week_low']:,}원"
+        
+        # PBR 정보
+        pbr_info = f"\n- PBR: {data.get('pbr', 'N/A')}" if 'pbr' in data else ""
+        
+        # ROE 정보
+        roe_info = f"\n- ROE: {data.get('roe', 'N/A')}%" if 'roe' in data and data.get('roe') != 'Unknown' else ""
+        
+        # 부채비율 정보
+        debt_info = f"\n- 부채비율: {data.get('debt_to_equity', 'N/A')}" if 'debt_to_equity' in data else ""
+        
+        # EPS 정보
+        eps_info = f"\n- EPS: {data.get('eps', 'N/A')}" if 'eps' in data else ""
+        
         return f"""
 주식 정보 ({data['company_name']} - {symbol}):
 - 현재가: {data['current_price']:,}원
@@ -22,9 +39,9 @@ class FinancialDataFormatter:
 - 거래량: {data['volume']:,}주
 - 고가: {data['high']:,}원
 - 저가: {data['low']:,}원
-- 시가: {data['open']:,}원
+- 시가: {data['open']:,}원{week_52_info}
 - 시가총액: {data['market_cap']:,}원
-- PER: {data['pe_ratio']}
+- PER: {data['pe_ratio']}{pbr_info}{roe_info}{eps_info}{debt_info}
 - 배당수익률: {data['dividend_yield']}
 - 섹터: {data['sector']}
 - 조회시간: {data['timestamp']}

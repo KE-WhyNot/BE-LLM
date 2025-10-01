@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.schemas.chat_schema import ChatRequest, ChatResponse
-from app.services.chatbot_service import chatbot_service
+from app.services.chatbot.chatbot_service import chatbot_service
 from typing import Dict, Any
 
 router = APIRouter()

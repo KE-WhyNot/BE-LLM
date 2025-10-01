@@ -1,6 +1,6 @@
 import asyncio
 import sys
-from app.services.chatbot_service import chatbot_service
+from app.services.chatbot.chatbot_service import chatbot_service
 from app.schemas.chat_schema import ChatRequest
 
 def get_user_input():
