@@ -1,7 +1,7 @@
 """응답 생성 서비스"""
 
 from typing import Dict, Any, List
-from app.services.formatters import stock_data_formatter, news_formatter, analysis_formatter
+from app.utils.formatters import stock_data_formatter, news_formatter, analysis_formatter
 from app.services.workflow_components.visualization_service import visualization_service
 
 

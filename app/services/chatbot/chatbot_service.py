@@ -2,7 +2,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from app.services.chatbot.financial_workflow import financial_workflow
 from app.services.monitoring_service import monitoring_service
-from app.services.knowledge_base_service import knowledge_base_service
+from app.utils.data_processing import knowledge_base_service
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 
 class FinancialChatbotService:

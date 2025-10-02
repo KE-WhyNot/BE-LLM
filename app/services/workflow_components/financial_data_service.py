@@ -1,7 +1,7 @@
 """금융 데이터 조회 서비스"""
 
 from typing import Dict, Any
-from app.services.external_api_service import external_api_service
+from app.utils.external import external_api_service
 from app.utils.stock_utils import extract_symbol_from_query
 
 
