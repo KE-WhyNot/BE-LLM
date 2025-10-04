@@ -1,13 +1,26 @@
-"""데이터 분석 서비스"""
+"""데이터 분석 서비스 (동적 프롬프팅 지원)"""
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from langchain_google_genai import ChatGoogleGenerativeAI
+from app.config import settings
+from app.services.langgraph_enhanced import prompt_manager
 
 
 class AnalysisService:
-    """금융 데이터 분석을 담당하는 서비스"""
+    """금융 데이터 분석을 담당하는 서비스 (동적 프롬프팅)"""
     
     def __init__(self):
-        pass
+        self.llm = self._initialize_llm()
+    
+    def _initialize_llm(self):
+        """LLM 초기화"""
+        if settings.google_api_key:
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash-exp",
+                temperature=0.7,
+                google_api_key=settings.google_api_key
+            )
+        return None
     
     def analyze_financial_data(self, data: Dict[str, Any]) -> str:
         """금융 데이터를 분석하여 인사이트 생성
@@ -134,6 +147,41 @@ class AnalysisService:
             
         except Exception as e:
             return f"추천 의견 생성 중 오류: {str(e)}"
+    
+    def generate_ai_analysis(self, 
+                            query: str, 
+                            financial_data: Dict[str, Any],
+                            user_context: Optional[Dict[str, Any]] = None) -> str:
+        """✨ LLM 기반 동적 프롬프팅 분석 (새로운 메서드)
+        
+        Args:
+            query: 사용자 질문
+            financial_data: 금융 데이터
+            user_context: 사용자 프로필 (선택)
+            
+        Returns:
+            str: AI 생성 분석 결과
+        """
+        if not self.llm:
+            # LLM이 없으면 기존 규칙 기반으로 폴백
+            return self.analyze_financial_data(financial_data)
+        
+        try:
+            # ✨ 동적 프롬프트 생성 (사용자 프로필 기반)
+            messages = prompt_manager.generate_analysis_prompt(
+                financial_data=financial_data,
+                user_query=query,
+                user_context=user_context
+            )
+            
+            # LLM 호출
+            response = self.llm.invoke(messages)
+            return response.content
+            
+        except Exception as e:
+            print(f"❌ AI 분석 생성 오류: {e}")
+            # 오류 시 기존 규칙 기반으로 폴백
+            return self.analyze_financial_data(financial_data)
 
 
 # 전역 서비스 인스턴스

@@ -35,7 +35,7 @@ class FinancialChatbotService:
             if not user_message:
                 return self._create_error_response("메시지를 입력해주세요.")
             
-            # LangGraph 워크플로우로 일원화 라우팅 (Gemini 2.0 Flash로 의도 분석)
+            # LangGraph 워크플로우로 일원화 라우팅 (자동 워크플로우 선택)
             result = self.financial_workflow.process_query(
                 user_message,
                 user_id=request.user_id
@@ -89,15 +89,7 @@ class FinancialChatbotService:
             
             return self._create_error_response(error_msg)
     
-    def _is_complex_query(self, message: str) -> bool:
-        """복잡한 쿼리인지 판단"""
-        complex_keywords = [
-            "분석", "전망", "투자", "추천", "의견", "전략",
-            "비교", "평가", "리포트", "종합", "상세"
-        ]
-        
-        message_lower = message.lower()
-        return any(keyword in message_lower for keyword in complex_keywords)
+    
     
     def _create_error_response(self, error_message: str) -> ChatResponse:
         """에러 응답 생성"""

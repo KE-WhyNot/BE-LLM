@@ -1,15 +1,28 @@
-"""응답 생성 서비스"""
+"""응답 생성 서비스 (동적 프롬프팅 지원)"""
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from langchain_google_genai import ChatGoogleGenerativeAI
+from app.config import settings
 from app.utils.formatters import stock_data_formatter, news_formatter, analysis_formatter
 from app.services.workflow_components.visualization_service import visualization_service
+from app.services.langgraph_enhanced import prompt_manager
 
 
 class ResponseGeneratorService:
-    """최종 응답을 생성하는 서비스"""
+    """최종 응답을 생성하는 서비스 (동적 프롬프팅)"""
     
     def __init__(self):
-        pass
+        self.llm = self._initialize_llm()
+    
+    def _initialize_llm(self):
+        """LLM 초기화"""
+        if settings.google_api_key:
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash-exp",
+                temperature=0.7,
+                google_api_key=settings.google_api_key
+            )
+        return None
     
     def generate_data_response(self, financial_data: Dict[str, Any]) -> str:
         """주식 데이터 조회 응답 생성
@@ -501,6 +514,200 @@ class ResponseGeneratorService:
 • 다른 재무 지표에 대해서도 궁금하신가요?
 • 실전 투자 전략에 대해 알아보시겠어요?
 • 특정 시장이나 섹터에 대해 더 알고 싶으신가요?"""
+    
+    def generate_response(self, state: Dict[str, Any]) -> str:
+        """통합 응답 생성 (동적 워크플로우용)
+        
+        Args:
+            state: 워크플로우 상태 딕셔너리
+            
+        Returns:
+            str: 최종 응답 텍스트
+        """
+        try:
+            query_type = state.get("query_type", "general")
+            user_query = state.get("user_query", "")
+            
+            # 쿼리 타입에 따른 응답 생성
+            if query_type in ["visualization", "contextual_visualization"]:
+                response = self._generate_visualization_response(state)
+            elif query_type in ["analysis", "detailed_analysis", "guided_analysis"]:
+                response = self._generate_analysis_response(state)
+            elif query_type in ["news", "contextual_news"]:
+                response = self._generate_news_response(state)
+            elif query_type in ["knowledge", "contextual_knowledge"]:
+                response = self._generate_knowledge_response(state)
+            elif query_type in ["data", "data_optimized"]:
+                response = self._generate_data_response(state.get("financial_data", {}))
+            else:
+                response = self._generate_general_response(state)
+            
+            return response
+            
+        except Exception as e:
+            return f"죄송합니다. 응답 생성 중 오류가 발생했습니다: {str(e)}"
+    
+    def _generate_visualization_response(self, state: Dict[str, Any]) -> str:
+        """시각화 응답 생성"""
+        financial_data = state.get("financial_data", {})
+        chart_data = state.get("chart_data", {})
+        
+        if not financial_data:
+            return "❌ 차트를 생성할 데이터가 없습니다."
+        
+        # 기본 주가 정보
+        response = self.generate_data_response(financial_data)
+        
+        # 차트 정보 추가
+        if chart_data:
+            response += "\n\n📊 **차트 정보:**"
+            response += "\n• 캔들스틱 차트와 거래량이 함께 표시됩니다"
+            response += "\n• 상단: 가격 변동 (빨간색: 상승, 파란색: 하락)"
+            response += "\n• 하단: 거래량 (평균 거래량 라인 포함)"
+        
+        return response
+    
+    def _generate_analysis_response(self, state: Dict[str, Any]) -> str:
+        """분석 응답 생성"""
+        analysis_result = state.get("analysis_result", "")
+        financial_data = state.get("financial_data", {})
+        
+        if not analysis_result:
+            return "❌ 분석 결과를 생성할 수 없습니다."
+        
+        response = analysis_result
+        
+        # 추가 데이터 정보
+        if financial_data:
+            response += "\n\n📈 **추가 데이터 정보:**"
+            response += f"\n• 종목: {financial_data.get('symbol', 'N/A')}"
+            response += f"\n• 현재가: {financial_data.get('current_price', 'N/A')}"
+        
+        return response
+    
+    def _generate_news_response(self, state: Dict[str, Any]) -> str:
+        """뉴스 응답 생성"""
+        news_data = state.get("news_data", [])
+        
+        if not news_data:
+            return "❌ 관련 뉴스를 찾을 수 없습니다."
+        
+        return self.generate_news_response(news_data)
+    
+    def _generate_knowledge_response(self, state: Dict[str, Any]) -> str:
+        """지식 응답 생성"""
+        knowledge_context = state.get("knowledge_context", "")
+        user_query = state.get("user_query", "")
+        
+        if not knowledge_context:
+            return f"❌ '{user_query}'에 대한 정보를 찾을 수 없습니다."
+        
+        response = f"📚 **{user_query}에 대한 설명:**\n\n"
+        response += knowledge_context
+        
+        # 추가 도움말
+        response += "\n\n💡 **더 알고 싶으시다면:**"
+        response += "\n• 구체적인 예시를 들어 설명해드릴 수 있습니다"
+        response += "\n• 관련된 다른 금융 용어도 궁금하시면 물어보세요"
+        
+        return response
+    
+    def _generate_general_response(self, state: Dict[str, Any]) -> str:
+        """일반 응답 생성"""
+        user_query = state.get("user_query", "")
+        
+        response = f"안녕하세요! '{user_query}'에 대해 도움을 드리겠습니다.\n\n"
+        response += "다음과 같은 정보를 제공할 수 있습니다:\n"
+        response += "• 📊 주식 가격 및 차트 정보\n"
+        response += "• 📈 투자 분석 및 인사이트\n"
+        response += "• 📰 관련 뉴스 및 시장 동향\n"
+        response += "• 📚 금융 용어 및 개념 설명\n\n"
+        response += "더 구체적인 질문을 해주시면 정확한 정보를 제공해드리겠습니다!"
+        
+        return response
+    
+    def generate_unified_response(self, 
+                                   query: str,
+                                   query_type: str,
+                                   financial_data: Optional[Dict[str, Any]] = None,
+                                   news_data: Optional[List[Dict[str, Any]]] = None,
+                                   analysis_result: Optional[str] = None,
+                                   knowledge_context: Optional[str] = None,
+                                   chart_data: Optional[Dict[str, Any]] = None,
+                                   user_context: Optional[Dict[str, Any]] = None) -> str:
+        """✨ LLM 기반 통합 응답 생성 (동적 프롬프팅)
+        
+        모든 데이터를 종합하여 일관되고 자연스러운 응답을 생성합니다.
+        
+        Args:
+            query: 사용자 질문
+            query_type: 쿼리 유형 (data, analysis, news, knowledge, visualization, general)
+            financial_data: 금융 데이터 (선택)
+            news_data: 뉴스 데이터 (선택)
+            analysis_result: 분석 결과 (선택)
+            knowledge_context: 지식 컨텍스트 (선택)
+            chart_data: 차트 데이터 (선택)
+            user_context: 사용자 프로필 (선택)
+            
+        Returns:
+            str: AI 생성 통합 응답
+        """
+        if not self.llm:
+            # LLM이 없으면 기존 메서드로 폴백
+            return self._generate_fallback_response(query_type, financial_data, news_data, knowledge_context)
+        
+        try:
+            # ✨ 쿼리 유형별 동적 프롬프트 생성
+            if query_type == "analysis" and financial_data:
+                messages = prompt_manager.generate_analysis_prompt(
+                    financial_data=financial_data,
+                    user_query=query,
+                    user_context=user_context
+                )
+            elif query_type == "news" and news_data:
+                messages = prompt_manager.generate_news_prompt(
+                    news_data=news_data,
+                    user_query=query
+                )
+            elif query_type == "knowledge" and knowledge_context:
+                messages = prompt_manager.generate_knowledge_prompt(
+                    knowledge_context=knowledge_context,
+                    user_query=query
+                )
+            elif query_type == "visualization" and chart_data:
+                messages = prompt_manager.generate_visualization_prompt(
+                    user_query=query
+                )
+            else:
+                # 일반 응답
+                return self._generate_general_response({"user_query": query})
+            
+            # LLM 호출
+            response = self.llm.invoke(messages)
+            return response.content
+            
+        except Exception as e:
+            print(f"❌ 통합 응답 생성 오류: {e}")
+            # 오류 시 기존 메서드로 폴백
+            return self._generate_fallback_response(query_type, financial_data, news_data, knowledge_context)
+    
+    def _generate_fallback_response(self, 
+                                     query_type: str,
+                                     financial_data: Optional[Dict[str, Any]] = None,
+                                     news_data: Optional[List[Dict[str, Any]]] = None,
+                                     knowledge_context: Optional[str] = None) -> str:
+        """폴백 응답 생성"""
+        if query_type == "data" and financial_data:
+            return self.generate_data_response(financial_data)
+        elif query_type == "analysis" and financial_data:
+            return self.generate_analysis_response(financial_data)
+        elif query_type == "news" and news_data:
+            return self.generate_news_response(news_data)
+        elif query_type == "knowledge" and knowledge_context:
+            state = {"user_query": "", "knowledge_context": knowledge_context}
+            return self.generate_response(state)
+        else:
+            return "죄송합니다. 요청을 처리할 수 없습니다."
 
 
 # 전역 서비스 인스턴스

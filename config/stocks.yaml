@@ -1,0 +1,159 @@
+# 주식 심볼 설정 파일
+# 새로운 종목 추가 시 이 파일만 수정하면 됩니다
+
+korean_stocks:
+  samsung_electronics:
+    names: ["삼성전자", "삼성", "삼전", "samsung", "samsung electronics"]
+    symbol: "005930.KS"
+    sector: "technology"
+    market_cap_rank: 1
+    description: "글로벌 반도체 1위, 메모리 반도체 강세"
+  
+  sk_hynix:
+    names: ["SK하이닉스", "하이닉스", "skhynix", "sk hynix", "hynix"]
+    symbol: "000660.KS"
+    sector: "technology"
+    market_cap_rank: 2
+    description: "글로벌 메모리 반도체 2위"
+  
+  naver:
+    names: ["네이버", "naver"]
+    symbol: "035420.KS"
+    sector: "technology"
+    market_cap_rank: 3
+    description: "한국 최대 인터넷 기업"
+  
+  kakao:
+    names: ["카카오", "kakao"]
+    symbol: "035720.KS"
+    sector: "technology"
+    market_cap_rank: 4
+    description: "모바일 플랫폼 기업"
+  
+  lg_electronics:
+    names: ["LG전자", "엘지전자", "lg전자", "lg electronics"]
+    symbol: "066570.KS"
+    sector: "technology"
+    market_cap_rank: 5
+    description: "가전 및 디스플레이 전문 기업"
+  
+  hyundai_motor:
+    names: ["현대차", "현대자동차", "hyundai", "hyundai motor"]
+    symbol: "005380.KS"
+    sector: "automotive"
+    market_cap_rank: 6
+    description: "한국 최대 자동차 제조사"
+  
+  kia:
+    names: ["기아", "기아자동차", "kia", "kia motors"]
+    symbol: "000270.KS"
+    sector: "automotive"
+    market_cap_rank: 7
+    description: "현대차 그룹 자동차 브랜드"
+  
+  lg_chem:
+    names: ["LG화학", "lg화학", "lg chem", "lgchemical"]
+    symbol: "051910.KS"
+    sector: "chemicals"
+    market_cap_rank: 8
+    description: "글로벌 화학 소재 기업"
+  
+  samsung_biologics:
+    names: ["삼성바이오로직스", "삼성바이오", "samsung biologics"]
+    symbol: "207940.KS"
+    sector: "biotechnology"
+    market_cap_rank: 9
+    description: "글로벌 바이오 CMO 1위"
+  
+  celltrion:
+    names: ["셀트리온", "celltrion"]
+    symbol: "068270.KS"
+    sector: "biotechnology"
+    market_cap_rank: 10
+    description: "바이오의약품 전문 기업"
+
+# 미국 주식
+us_stocks:
+  apple:
+    names: ["애플", "apple", "aapl"]
+    symbol: "AAPL"
+    sector: "technology"
+    market_cap_rank: 1
+    description: "글로벌 스마트폰 및 기술 기업"
+  
+  microsoft:
+    names: ["마이크로소프트", "microsoft", "msft"]
+    symbol: "MSFT"
+    sector: "technology"
+    market_cap_rank: 2
+    description: "소프트웨어 및 클라우드 기업"
+  
+  google:
+    names: ["구글", "google", "googl", "alphabet"]
+    symbol: "GOOGL"
+    sector: "technology"
+    market_cap_rank: 3
+    description: "검색 및 광고 플랫폼 기업"
+  
+  tesla:
+    names: ["테슬라", "tesla", "tsla"]
+    symbol: "TSLA"
+    sector: "automotive"
+    market_cap_rank: 4
+    description: "전기차 및 에너지 기업"
+
+# 지수
+indices:
+  kospi:
+    names: ["코스피", "kospi", "한국종합주가지수"]
+    symbol: "^KS11"
+    sector: "index"
+    description: "한국 종합 주가 지수"
+  
+  kosdaq:
+    names: ["코스닥", "kosdaq", "한국거래소코스닥시장"]
+    symbol: "^KQ11"
+    sector: "index"
+    description: "한국 거래소 코스닥 시장"
+  
+  nasdaq:
+    names: ["나스닥", "nasdaq"]
+    symbol: "^IXIC"
+    sector: "index"
+    description: "나스닥 종합 지수"
+  
+  s&p500:
+    names: ["s&p500", "sp500", "s&p 500", "s&p"]
+    symbol: "^GSPC"
+    sector: "index"
+    description: "S&P 500 지수"
+
+# 섹터별 분류
+sectors:
+  technology:
+    keywords: ["반도체", "소프트웨어", "인터넷", "모바일", "ai", "ai", "5g"]
+    description: "기술 관련 기업들"
+  
+  automotive:
+    keywords: ["자동차", "전기차", "배터리", "모빌리티"]
+    description: "자동차 관련 기업들"
+  
+  biotechnology:
+    keywords: ["바이오", "의약품", "제약", "cmc", "cmo"]
+    description: "생명공학 및 의약품 기업들"
+  
+  chemicals:
+    keywords: ["화학", "소재", "플라스틱", "석유화학"]
+    description: "화학 및 소재 기업들"
+  
+  finance:
+    keywords: ["은행", "금융", "증권", "보험", "카드"]
+    description: "금융 관련 기업들"
+
+# 설정
+settings:
+  default_market: "korean"
+  confidence_threshold: 0.7
+  max_search_results: 10
+  cache_duration: 3600  # 1시간 (초)
+

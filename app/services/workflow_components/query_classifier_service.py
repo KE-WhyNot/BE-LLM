@@ -1,8 +1,9 @@
-"""쿼리 분류 서비스 - Gemini 2.0 Flash를 사용한 의도 분석"""
+"""쿼리 분류 서비스 - Gemini 2.0 Flash를 사용한 의도 분석 (동적 프롬프팅)"""
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from app.config import settings
+from app.services.langgraph_enhanced import prompt_manager
 
 
 class QueryClassifierService:
@@ -47,45 +48,13 @@ class QueryClassifierService:
             return self._classify_with_keywords(query)
     
     def _classify_with_llm(self, query: str) -> str:
-        """Gemini 2.0 Flash를 사용한 의도 분류"""
+        """Gemini 2.0 Flash를 사용한 의도 분류 (동적 프롬프팅)"""
         try:
-            classification_prompt = f"""당신은 금융 챗봇의 의도 분류 전문가입니다.
-사용자 질문을 분석하여 정확히 6가지 카테고리 중 하나로 분류하세요.
-
-## 카테고리 정의
-1. **data** - 실시간 주식 가격, 시세, 현재가 조회 요청 (차트 없이 텍스트만)
-   예시: "삼성전자 주가 텍스트로만", "SK하이닉스 현재가 숫자만"
-   
-2. **analysis** - 주식 분석, 투자 전망, 추천 요청
-   예시: "삼성전자 투자해도 될까?", "네이버 전망 분석해줘", "LG전자 추천해?"
-   
-3. **news** - 뉴스, 최신 소식, 동향, 이슈 조회
-   예시: "삼성전자 최근 뉴스", "반도체 관련 소식", "최근 시장 이슈"
-   
-4. **knowledge** - 금융 용어, 개념, 원리 설명 요청
-   예시: "PER이 뭐야?", "손절매의 의미는?", "배당금 설명해줘"
-   
-5. **visualization** - 차트, 그래프, 시각화 요청 (주가/가격/시세 포함)
-   예시: "삼성전자 주가 알려줘", "네이버 현재가", "SK하이닉스 가격", "삼성전자 차트 보여줘"
-   
-6. **general** - 인사, 잡담, 기타 질문
-   예시: "안녕", "고마워", "뭐 할 수 있어?"
-
-## 분류 규칙
-- 종목명 + "주가/가격/시세/현재가" → **visualization**
-- 종목명 + "분석/전망/추천/투자" → **analysis**  
-- "뉴스/소식/이슈/동향" 포함 → **news**
-- "차트/그래프/시각화/캔들" 포함 → **visualization**
-- "뜻/의미/설명/이해/무엇" 포함 → **knowledge**
-- 종목명/금융 키워드 없음 → **general**
-
-## 사용자 질문
-"{query}"
-
-## 출력
-한 단어만 출력하세요 (data, analysis, news, knowledge, visualization, general 중 하나)"""
-
-            response = self.llm.invoke(classification_prompt)
+            # ✨ 동적 프롬프트 생성 (prompt_manager 사용)
+            messages = prompt_manager.generate_classification_prompt(query)
+            
+            # LLM 호출
+            response = self.llm.invoke(messages)
             
             # 응답에서 카테고리 추출
             result = response.content.strip().lower()

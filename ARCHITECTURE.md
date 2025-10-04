@@ -685,7 +685,7 @@ analysis_formatter.format_stock_analysis(data, symbol)
 # ChromaDB 벡터 스토어 초기화
 __init__(persist_directory="./chroma_db")
 ├─► HuggingFace Embeddings 로드
-│   └─► sentence-transformers/all-MiniLM-L6-v2
+│   └─► kakaobrain/kor-base (카카오 한국어 임베딩)
 ├─► ChromaDB 벡터 스토어 연결
 └─► 문서 분할기 설정 (chunk_size=1000, overlap=200)
 ```
@@ -735,7 +735,7 @@ get_context_for_query(query: str) -> str
 #### **기술 스택**
 
 - **Vector DB**: ChromaDB (./chroma_db)
-- **Embeddings**: HuggingFace sentence-transformers/all-MiniLM-L6-v2
+- **Embeddings**: HuggingFace kakaobrain/kor-base (카카오 한국어 임베딩)
 - **Text Splitting**: RecursiveCharacterTextSplitter (chunk_size=1000, overlap=200)
 - **데이터 소스**: `data/` 폴더의 txt 파일들
 

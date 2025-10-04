@@ -160,3 +160,9 @@ yfinance==0.2.66
 zipp==3.23.0
 zstandard==0.25.0
 matplotlib>=3.9.0
+
+# Data-Agent dependencies
+feedparser>=6.0.10
+py2neo>=2021.2.4
+apscheduler>=3.10.4
+pyyaml>=6.0.2

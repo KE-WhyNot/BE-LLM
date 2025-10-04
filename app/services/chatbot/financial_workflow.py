@@ -16,6 +16,13 @@ from app.services.workflow_components.response_generator_service import response
 from app.services.workflow_components.visualization_service import visualization_service
 from app.services.rag_service import rag_service
 
+# 간소화된 지능형 워크플로우 (선택적 사용)
+try:
+    from app.services.langgraph_enhanced import simplified_intelligent_workflow
+    INTELLIGENT_WORKFLOW_AVAILABLE = True
+except ImportError:
+    INTELLIGENT_WORKFLOW_AVAILABLE = False
+
 
 class FinancialWorkflowState(TypedDict):
     """금융 워크플로우 상태 정의"""
@@ -161,7 +168,8 @@ class FinancialWorkflowService:
                 state["financial_data"] = data
             
         except Exception as e:
-            state["error"] = f"데이터 조회 중 오류: {str(e)}"
+            from app.utils.common_utils import ErrorHandler
+            state["error"] = ErrorHandler.handle_workflow_error(e, "데이터 조회")
         
         return state
     
@@ -180,7 +188,8 @@ class FinancialWorkflowService:
             state["next_step"] = "generate_response"
             
         except Exception as e:
-            state["error"] = f"분석 중 오류: {str(e)}"
+            from app.utils.common_utils import ErrorHandler
+            state["error"] = ErrorHandler.handle_workflow_error(e, "분석")
             state["next_step"] = "error"
         
         return state
@@ -194,7 +203,8 @@ class FinancialWorkflowService:
             state["next_step"] = "generate_response"
             
         except Exception as e:
-            state["error"] = f"뉴스 조회 중 오류: {str(e)}"
+            from app.utils.common_utils import ErrorHandler
+            state["error"] = ErrorHandler.handle_workflow_error(e, "뉴스 조회")
             state["next_step"] = "error"
         
         return state
@@ -208,7 +218,8 @@ class FinancialWorkflowService:
             state["next_step"] = "generate_response"
             
         except Exception as e:
-            state["error"] = f"지식 검색 중 오류: {str(e)}"
+            from app.utils.common_utils import ErrorHandler
+            state["error"] = ErrorHandler.handle_workflow_error(e, "지식 검색")
             state["next_step"] = "error"
         
         return state
@@ -291,69 +302,174 @@ class FinancialWorkflowService:
         return state
     
     def process_query(self, user_query: str, user_id: Optional[str] = None) -> Dict[str, Any]:
-        """사용자 쿼리 처리 - 워크플로우 실행"""
+        """사용자 쿼리 처리 - 메인 진입점 (자동 워크플로우 선택)"""
         try:
+            # API 키 확인
             if self.workflow is None:
-                # API 키가 없을 때는 기본 응답
-                return {
-                    "success": True,
-                    "reply_text": "안녕하세요! 금융 전문가 챗봇입니다. API 키를 설정하면 더 정확한 분석을 제공할 수 있습니다.",
-                    "action_type": "display_info",
-                    "action_data": {
-                        "message": "API 키가 설정되지 않았습니다.",
-                        "timestamp": datetime.now().isoformat(),
-                        "user_id": user_id
-                    }
-                }
+                return self._create_api_key_missing_response(user_id)
             
-            # 초기 상태 설정
-            initial_state = FinancialWorkflowState(
-                messages=[HumanMessage(content=user_query)],
-                user_query=user_query,
-                query_type="",
-                financial_data={},
-                analysis_result="",
-                news_data=[],
-                knowledge_context="",
-                chart_data=None,
-                final_response="",
-                error="",
-                next_step=""
+            # 복잡도에 따른 자동 워크플로우 선택
+            use_intelligent = self._should_use_intelligent_workflow(user_query)
+            
+            if use_intelligent and INTELLIGENT_WORKFLOW_AVAILABLE:
+                return self._process_with_intelligent_workflow(user_query, user_id)
+            else:
+                # 기본 워크플로우 실행
+                result = self._execute_workflow(user_query)
+                return self._create_success_response(result, user_id)
+            
+        except Exception as e:
+            return self._create_error_response(e, user_id)
+    
+    def _should_use_intelligent_workflow(self, user_message: str) -> bool:
+        """지능형 워크플로우 사용 여부 자동 결정"""
+        # 복잡한 질문 키워드들
+        complex_keywords = [
+            "종합", "비교", "분석", "예측", "추천", "의견", "고려",
+            "여러", "다양한", "상세", "심화", "고급", "전문적"
+        ]
+        
+        # 멀티 서비스가 필요한 키워드들
+        multi_service_keywords = [
+            "뉴스", "차트", "분석", "지식", "설명", "현재가", "예측"
+        ]
+        
+        # 질문 복잡도 점수 계산
+        complexity_score = 0
+        service_count = 0
+        
+        message_lower = user_message.lower()
+        
+        # 복잡도 키워드 체크
+        for keyword in complex_keywords:
+            if keyword in message_lower:
+                complexity_score += 2
+        
+        # 멀티 서비스 키워드 체크
+        for keyword in multi_service_keywords:
+            if keyword in message_lower:
+                service_count += 1
+        
+        # 문장 길이 고려
+        if len(user_message) > 30:
+            complexity_score += 1
+        
+        # 여러 문장이나 질문이 있는 경우
+        if user_message.count("?") > 1 or user_message.count("그리고") > 0:
+            complexity_score += 2
+        
+        # 지능형 워크플로우 사용 조건
+        use_intelligent = (
+            complexity_score >= 3 or  # 복잡도 점수가 3 이상
+            service_count >= 3 or    # 3개 이상의 서비스가 필요
+            len(user_message) > 50   # 긴 질문
+        )
+        
+        if use_intelligent:
+            print(f"🧠 지능형 워크플로우 자동 선택: 복잡도={complexity_score}, 서비스={service_count}")
+        else:
+            print(f"⚡ 기본 워크플로우 자동 선택: 복잡도={complexity_score}, 서비스={service_count}")
+        
+        return use_intelligent
+    
+    def _process_with_intelligent_workflow(self, user_query: str, user_id: Optional[str]) -> Dict[str, Any]:
+        """지능형 멀티 서비스 워크플로우로 처리"""
+        try:
+            print(f"🧠 지능형 멀티 서비스 워크플로우 사용")
+            
+            result = simplified_intelligent_workflow.process_query(
+                query=user_query,
+                user_id=int(user_id) if user_id else 1,
+                session_id=f"intelligent_{user_id or 'default'}"
             )
             
-            # 워크플로우 실행
-            result = self.workflow.invoke(initial_state)
-            
-            # 차트 데이터 추출
-            chart_data = result.get("chart_data", None)
-            action_data_with_chart = {
-                "query_type": result.get("query_type", "unknown"),
-                "timestamp": datetime.now().isoformat(),
-                "user_id": user_id
-            }
-            
-            # visualization 쿼리인 경우 차트 포함
-            if chart_data and isinstance(chart_data, dict) and "chart" in chart_data:
-                action_data_with_chart["chart"] = chart_data["chart"]
-                action_data_with_chart["chart_type"] = chart_data.get("chart_type", "unknown")
-            
+            # 응답 형식을 기존 형식에 맞게 변환
             return {
-                "success": True,
-                "reply_text": result["final_response"],
-                "action_type": "show_chart" if chart_data else "display_info",
-                "action_data": action_data_with_chart
+                "success": "error" not in result,
+                "reply_text": result.get("response", ""),
+                "action_type": "intelligent_analysis",
+                "action_data": {
+                    "query_complexity": result.get("query_complexity", ""),
+                    "confidence_score": result.get("confidence_score", 0.0),
+                    "services_used": result.get("services_used", []),
+                    "fallback_used": result.get("fallback_used", []),
+                    "timestamp": datetime.now().isoformat(),
+                    "user_id": user_id,
+                    "workflow_type": "intelligent_multi_service"
+                },
+                "chart_image": result.get("chart_data", {}).get("chart_base64") if result.get("chart_data") else None
             }
             
         except Exception as e:
-            return {
-                "success": False,
-                "reply_text": f"죄송합니다. 처리 중 오류가 발생했습니다: {str(e)}",
-                "action_type": "display_info",
-                "action_data": {
-                    "error": str(e),
-                    "timestamp": datetime.now().isoformat()
-                }
+            print(f"❌ 지능형 워크플로우 실패, 기본 워크플로우로 폴백: {e}")
+            # 폴백: 기본 워크플로우 사용
+            result = self._execute_workflow(user_query)
+            return self._create_success_response(result, user_id)
+    
+    def _create_api_key_missing_response(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """API 키가 없을 때의 응답 생성"""
+        return {
+            "success": True,
+            "reply_text": "안녕하세요! 금융 전문가 챗봇입니다. API 키를 설정하면 더 정확한 분석을 제공할 수 있습니다.",
+            "action_type": "display_info",
+            "action_data": {
+                "message": "API 키가 설정되지 않았습니다.",
+                "timestamp": datetime.now().isoformat(),
+                "user_id": user_id
             }
+        }
+    
+    def _execute_workflow(self, user_query: str) -> FinancialWorkflowState:
+        """워크플로우 실행"""
+        initial_state = FinancialWorkflowState(
+            messages=[HumanMessage(content=user_query)],
+            user_query=user_query,
+            query_type="",
+            financial_data={},
+            analysis_result="",
+            news_data=[],
+            knowledge_context="",
+            chart_data=None,
+            final_response="",
+            error="",
+            next_step=""
+        )
+        
+        return self.workflow.invoke(initial_state)
+    
+    def _create_success_response(self, result: FinancialWorkflowState, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """성공 응답 생성"""
+        chart_data = result.get("chart_data", None)
+        action_data = {
+            "query_type": result.get("query_type", "unknown"),
+            "timestamp": datetime.now().isoformat(),
+            "user_id": user_id
+        }
+        
+        # visualization 쿼리인 경우 차트 포함
+        if chart_data and isinstance(chart_data, dict) and "chart" in chart_data:
+            action_data["chart"] = chart_data["chart"]
+            action_data["chart_type"] = chart_data.get("chart_type", "unknown")
+        
+        return {
+            "success": True,
+            "reply_text": result["final_response"],
+            "action_type": "show_chart" if chart_data else "display_info",
+            "action_data": action_data
+        }
+    
+    def _create_error_response(self, error: Exception, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """에러 응답 생성"""
+        return {
+            "success": False,
+            "reply_text": f"죄송합니다. 처리 중 오류가 발생했습니다: {str(error)}",
+            "action_type": "display_info",
+            "action_data": {
+                "error": str(error),
+                "timestamp": datetime.now().isoformat(),
+                "user_id": user_id
+            }
+        }
 
 
 # 전역 워크플로우 서비스 인스턴스

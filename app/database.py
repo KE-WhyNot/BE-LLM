@@ -1,13 +1,17 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
+from app.config import settings
 
-# ⚠️ 아래 접속 정보는 실제 프로그래머님의 MySQL 환경에 맞게 수정해야 합니다.
-# 형식: "mysql+pymysql://[사용자이름]:[비밀번호]@[DB서버주소]/[DB이름]"
-SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:password@127.0.0.1/financial_db"
+# 환경 변수에서 데이터베이스 URL 가져오기 (보안 강화)
+SQLALCHEMY_DATABASE_URL = settings.database_url
 
 # 데이터베이스 연결 엔진 생성
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_pre_ping=True,  # 연결 상태 확인
+    pool_recycle=300     # 5분마다 연결 재사용
+)
 
 # 데이터베이스와 통신할 세션(Session) 생성
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

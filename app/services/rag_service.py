@@ -12,29 +12,38 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
-from typing import List
+from typing import List, Optional
+from app.config import settings
+from app.utils.common_utils import get_config_manager
 
 
 class FinancialRAGService:
     """금융 RAG 서비스 - 벡터 검색 전용"""
     
-    def __init__(self, persist_directory: str = "./chroma_db"):
+    def __init__(self, persist_directory: Optional[str] = None):
         """
         RAG 서비스 초기화
         
         Args:
-            persist_directory: ChromaDB 저장 경로
+            persist_directory: ChromaDB 저장 경로 (None이면 설정에서 가져옴)
         """
-        self.persist_directory = persist_directory
+        self.persist_directory = persist_directory or settings.chroma_persist_directory
+        
+        # 공통 설정 사용
+        config_manager = get_config_manager()
+        rag_settings = config_manager.get_rag_settings()
+        chunk_settings = config_manager.get_chunk_settings()
+        
         self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_name=config_manager.get_embedding_model(),
             model_kwargs={'device': 'cpu'}
         )
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
+            chunk_size=chunk_settings['chunk_size'],
+            chunk_overlap=chunk_settings['chunk_overlap'],
             length_function=len,
         )
+        self.max_search_results = rag_settings['max_search_results']
         self.vectorstore = None
         self._initialize_vectorstore()
     
@@ -76,17 +85,20 @@ class FinancialRAGService:
         self.vectorstore.add_documents(split_docs)
         print(f"✅ {len(split_docs)}개의 문서 청크를 벡터 스토어에 추가했습니다.")
     
-    def search_relevant_documents(self, query: str, k: int = 5) -> List[Document]:
+    def search_relevant_documents(self, query: str, k: Optional[int] = None) -> List[Document]:
         """
         관련 문서 검색 (벡터 유사도 기반)
         
         Args:
             query: 검색 쿼리
-            k: 반환할 문서 개수
+            k: 반환할 문서 개수 (None이면 설정값 사용)
             
         Returns:
             List[Document]: 유사도가 높은 상위 k개 문서
         """
+        if k is None:
+            k = self.max_search_results
+            
         if not self.vectorstore:
             print("⚠️ 벡터 스토어가 초기화되지 않았습니다.")
             return []
