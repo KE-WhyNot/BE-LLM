@@ -25,10 +25,18 @@ class Settings(BaseSettings):
     # 벡터 데이터베이스 설정
     chroma_persist_directory: Optional[str] = None
     
-    # Neo4j 설정 (Data-Agent용)
+    # Neo4j 설정
     neo4j_uri: Optional[str] = None
     neo4j_user: Optional[str] = None
     neo4j_password: Optional[str] = None
+    
+    # RSS 피드 설정
+    naver_rss_feeds: Optional[str] = None
+    daum_rss_feeds: Optional[str] = None
+    finance_keywords: Optional[str] = None
+    
+    # 관계 추출 모델 설정
+    relation_extraction_model: Optional[str] = "kakaobank/kf-deberta-base"
     
     # Gemini 모델 설정
     gemini_temperature: Optional[float] = None

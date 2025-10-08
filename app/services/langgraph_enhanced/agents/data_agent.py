@@ -193,3 +193,4 @@ additional_info: [값]"""
                 'error': f"데이터 조회 중 오류: {str(e)}",
                 'is_simple_request': False
             }
+

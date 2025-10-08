@@ -30,3 +30,4 @@ class BaseAgent(ABC):
     def log(self, message: str):
         """로그 출력"""
         print(f"🤖 {self.agent_name}: {message}")
+

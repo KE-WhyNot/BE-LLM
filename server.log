@@ -354,3 +354,47 @@ INFO:     127.0.0.1:65226 - "POST /api/v1/chat HTTP/1.1" 200 OK
   plt.show()
 ⚡ 기본 워크플로우 자동 선택: 복잡도=0, 서비스=0
 INFO:     127.0.0.1:65242 - "POST /api/v1/chat HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'app/services/langgraph_enhanced/simplified_intelligent_workflow.py', 'app/utils/common_utils.py', 'config/__init__.py', 'app/utils/stock_config_loader.py', 'app/services/workflow_components/response_generator_service.py', 'app/utils/visualization/__init__.py', 'app/services/chatbot/financial_workflow.py', 'tests/test_integrated_dynamic_workflow.py', 'app/services/workflow_components/query_classifier_service.py', 'app/services/langgraph_enhanced/__init__.py', 'app/database.py', 'app/services/workflow_components/analysis_service.py', 'app/config.py', 'tests/test_simple_dynamic_workflow.py', 'tests/examples/data_agent_example.py', 'app/services/workflow_components/news_service.py', 'tests/examples/__init__.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [62019]
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1759598050.914173 3256044 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+E0000 00:00:1759598050.917613 3256044 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+E0000 00:00:1759598051.369187 3256044 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-05 02:14:13,505 - app.services.workflow_components.data_agent_service - INFO - 관계 추출 모델 로딩: kakaobank/kf-deberta-base
+Some weights of DebertaV2ForTokenClassification were not initialized from the model checkpoint at kakaobank/kf-deberta-base and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Device set to use mps:0
+2025-10-05 02:14:14,933 - app.services.workflow_components.data_agent_service - INFO - 관계 추출 모델 로딩 완료
+2025-10-05 02:14:14,982 - app.services.workflow_components.data_agent_service - ERROR - Neo4j 연결 실패: Connection has been closed
+E0000 00:00:1759598054.984495 3256044 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+E0000 00:00:1759598055.185751 3256044 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-05 02:14:15,425 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
+2025-10-05 02:14:18,455 - chromadb.telemetry.product.posthog - INFO - Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+E0000 00:00:1759598058.510814 3256044 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+🤖 Gemini LLM 로드: gemini-2.0-flash-exp (temperature: 0.1)
+✅ 주식 설정 로드 완료: 58개 종목
+✅ 기존 벡터 스토어를 성공적으로 로드했습니다.
+LangSmith 모니터링이 활성화되었습니다.
+'data' 디렉토리에서 지식 베이스 구축을 시작합니다.
+  0%|          | 0/7 [00:00<?, ?it/s]100%|██████████| 7/7 [00:00<00:00, 5003.43it/s]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+INFO:     Started server process [62158]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [62158]
+INFO:     Stopping reloader process [61792]
+/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/resource_tracker.py:324: UserWarning: resource_tracker: There appear to be 10 leaked semaphore objects to clean up at shutdown: {'/loky-61947-_lwvnorr', '/loky-61806-9830mrko', '/loky-62003-6cturd9x', '/loky-61919-3ysy857n', '/loky-62158-q6qkffz_', '/loky-61884-hb61npv1', '/loky-62019-b6e5o9b7', '/loky-61901-ey4f09z3', '/loky-61977-wrq6f0es', '/loky-61836-xoiocdjt'}
+  warnings.warn(

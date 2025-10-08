@@ -157,3 +157,4 @@ next_agent: [값]"""
         prompt = self.get_prompt_template().format(user_query=user_query)
         response = self.llm.invoke(prompt)
         return self.parse_response(response.content.strip())
+

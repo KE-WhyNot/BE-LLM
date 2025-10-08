@@ -350,3 +350,4 @@ asyncio.run(MKKnowledgeGraphService().update_knowledge_graph())
 
 **작성일**: 2025-10-05
 **버전**: 1.0.0
+

@@ -166,3 +166,11 @@ feedparser>=6.0.10
 py2neo>=2021.2.4
 apscheduler>=3.10.4
 pyyaml>=6.0.2
+
+# 매일경제 RSS 스크래퍼 dependencies
+sentence-transformers>=2.2.0
+transformers>=4.20.0
+torch>=1.12.0
+
+# Google RSS 번역 dependencies
+deep-translator>=1.11.4

@@ -300,3 +300,4 @@ recommendation_style: [값]"""
                 return symbol
         
         return None
+

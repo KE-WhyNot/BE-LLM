@@ -268,3 +268,4 @@ focus_areas: [값]"""
         # 날짜순 정렬 (최신순)
         unique_news.sort(key=lambda x: x.get('published', ''), reverse=True)
         return unique_news
+
