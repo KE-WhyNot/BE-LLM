@@ -5,7 +5,9 @@
 
 from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
-from app.services.workflow_components import financial_data_service, analysis_service
+from app.services.workflow_components import financial_data_service, analysis_service, news_service
+from app.services.pinecone_rag_service import get_context_for_query
+from app.services.pinecone_config import KNOWLEDGE_NAMESPACES
 
 
 class AnalysisAgent(BaseAgent):
@@ -208,8 +210,8 @@ recommendation_style: [값]"""
         
         return "\n".join(formatted)
     
-    def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """분석 에이전트 처리"""
+    async def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """분석 에이전트 처리 (RAG + 뉴스 통합)"""
         try:
             self.log(f"투자 분석 시작: {user_query}")
             
@@ -224,32 +226,124 @@ recommendation_style: [값]"""
             response = self.llm.invoke(prompt)
             strategy = self.parse_analysis_strategy(response.content.strip())
             
-            # 금융 데이터 수집 (쿼리에서 종목명 추출)
+            # 종목명 추출
             stock_symbol = self._extract_stock_symbol(user_query)
-            financial_data = {}
+            stock_name = self._extract_stock_name(user_query)
             
+            # 1. 실시간 금융 데이터 수집
+            financial_data = {}
             if stock_symbol:
                 try:
                     financial_data = financial_data_service.get_financial_data(stock_symbol)
                     if "error" in financial_data:
-                        self.log(f"데이터 수집 실패: {financial_data['error']}")
+                        self.log(f"실시간 데이터 수집 실패: {financial_data['error']}")
                         financial_data = {}
                 except Exception as e:
-                    self.log(f"데이터 수집 오류: {e}")
+                    self.log(f"실시간 데이터 수집 오류: {e}")
                     financial_data = {}
             
-            # 투자 분석 수행
-            if financial_data and "error" not in financial_data:
-                analysis_prompt = self.generate_investment_analysis_prompt(financial_data, strategy, user_query)
+            # 2. RAG에서 재무제표 데이터 가져오기
+            rag_financial_context = ""
+            if stock_name:
+                try:
+                    self.log(f"RAG 재무제표 검색: {stock_name}")
+                    rag_query = f"{stock_name} 재무제표 재무 분석 실적"
+                    rag_financial_context = get_context_for_query(
+                        query=rag_query,
+                        top_k=5,
+                        namespace=KNOWLEDGE_NAMESPACES["financial_analysis"]
+                    )
+                    if rag_financial_context:
+                        self.log(f"RAG 재무제표 발견: {len(rag_financial_context)} 글자")
+                    else:
+                        self.log("RAG 재무제표 없음")
+                except Exception as e:
+                    self.log(f"RAG 재무제표 검색 오류: {e}")
+            
+            # 3. 뉴스 데이터 가져오기
+            news_context = ""
+            recent_news = []
+            if stock_name:
+                try:
+                    self.log(f"최신 뉴스 검색: {stock_name}")
+                    # 영어 이름으로 변환하여 검색
+                    english_name = self._get_english_name(stock_name)
+                    news_data = await news_service.get_comprehensive_news(
+                        query=english_name,
+                        use_google_rss=True,
+                        translate=True
+                    )
+                    
+                    if news_data and isinstance(news_data, list):
+                        recent_news = news_data[:5]  # 최근 5개 뉴스
+                        news_summaries = []
+                        for news in recent_news:
+                            summary = f"- {news.get('title', 'N/A')}"
+                            if news.get('published'):
+                                summary += f" ({news.get('published')})"
+                            news_summaries.append(summary)
+                        news_context = "\n".join(news_summaries)
+                        self.log(f"뉴스 수집 완료: {len(recent_news)}건")
+                    else:
+                        self.log("뉴스 없음")
+                except Exception as e:
+                    self.log(f"뉴스 검색 오류: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # 4. 통합 분석 수행
+            if financial_data or rag_financial_context or news_context:
+                analysis_prompt = f"""당신은 전문 투자 분석가입니다. 다음 정보를 종합하여 투자 분석을 제공해주세요.
+
+## 사용자 질문
+"{user_query}"
+
+## 분석 전략
+- 분석 유형: {strategy.get('analysis_type', 'investment')}
+- 분석 깊이: {strategy.get('analysis_depth', 'comprehensive')}
+- 투자 기간: {strategy.get('time_horizon', 'medium')}
+- 리스크 수준: {strategy.get('risk_level', 'moderate')}
+- 집중 영역: {strategy.get('focus_areas', 'profitability,growth')}
+
+## 1. 실시간 금융 데이터
+{self._format_financial_data(financial_data) if financial_data else "실시간 데이터 없음"}
+
+## 2. 재무제표 및 재무 분석 (RAG)
+{rag_financial_context if rag_financial_context else "재무제표 데이터 없음"}
+
+## 3. 최신 뉴스
+{news_context if news_context else "최신 뉴스 없음"}
+
+## 분석 요구사항
+1. **재무 분석**: 재무제표 데이터를 바탕으로 재무 건전성, 수익성, 성장성 평가
+2. **뉴스 분석**: 최신 뉴스를 반영한 시장 동향 및 이슈 파악
+3. **종합 평가**: 재무 + 뉴스를 통합한 투자 의견
+4. **투자 추천**: 구체적인 투자 전략 및 주의사항
+
+다음 형식으로 응답해주세요:
+
+### 📊 재무 분석
+[재무제표 기반 분석]
+
+### 📰 뉴스 분석
+[최신 뉴스 기반 동향 분석]
+
+### 💡 종합 투자 의견
+[통합 분석 및 투자 추천]
+
+### ⚠️ 주의사항
+[리스크 및 주의할 점]
+"""
+                
                 analysis_response = self.llm.invoke(analysis_prompt)
                 analysis_result = analysis_response.content
                 
-                self.log(f"투자 분석 완료: {stock_symbol}")
+                self.log(f"통합 투자 분석 완료: {stock_symbol or stock_name}")
             else:
                 analysis_result = f"""
 📊 **분석 불가 안내**
 
-죄송합니다. {stock_symbol or '해당 종목'}의 금융 데이터를 가져올 수 없어 상세한 분석을 제공할 수 없습니다.
+죄송합니다. {stock_name or stock_symbol or '해당 종목'}의 데이터를 충분히 가져올 수 없어 상세한 분석을 제공할 수 없습니다.
 
 **대안 방법:**
 1. 정확한 종목명으로 다시 질문해주세요
@@ -261,23 +355,76 @@ recommendation_style: [값]"""
 - "네이버 주가 분석"
 - "카카오 밸류에이션"
 """
-                self.log("데이터 없음으로 분석 불가")
+                self.log("데이터 부족으로 분석 불가")
             
             return {
                 'success': True,
                 'financial_data': financial_data,
+                'rag_context_length': len(rag_financial_context),
+                'news_count': len(recent_news),
                 'analysis_result': analysis_result,
                 'strategy': strategy,
-                'stock_symbol': stock_symbol
+                'stock_symbol': stock_symbol,
+                'stock_name': stock_name
             }
             
         except Exception as e:
             self.log(f"분석 에이전트 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': f"투자 분석 중 오류: {str(e)}",
                 'analysis_result': "분석에 실패했습니다. 다시 시도해주세요."
             }
+    
+    def _format_financial_data(self, data: Dict[str, Any]) -> str:
+        """금융 데이터 포맷팅"""
+        if not data or "error" in data:
+            return "데이터 없음"
+        
+        formatted = []
+        if "current_price" in data:
+            formatted.append(f"현재가: {data['current_price']}원")
+        if "change_percent" in data:
+            formatted.append(f"등락률: {data['change_percent']}%")
+        if "volume" in data:
+            formatted.append(f"거래량: {data['volume']:,}주")
+        if "per" in data:
+            formatted.append(f"PER: {data['per']}")
+        if "pbr" in data:
+            formatted.append(f"PBR: {data['pbr']}")
+        
+        return "\n".join(formatted) if formatted else "데이터 없음"
+    
+    def _get_english_name(self, korean_name: str) -> str:
+        """한글 종목명을 영어로 변환"""
+        name_mapping = {
+            '삼성전자': 'Samsung Electronics',
+            '네이버': 'Naver',
+            '카카오': 'Kakao',
+            'SK하이닉스': 'SK Hynix',
+            'LG화학': 'LG Chem',
+            '현대차': 'Hyundai Motor',
+            'POSCO': 'POSCO',
+            '기아': 'Kia',
+            'LG전자': 'LG Electronics',
+            '삼성바이오로직스': 'Samsung Biologics'
+        }
+        return name_mapping.get(korean_name, korean_name)
+    
+    def _extract_stock_name(self, query: str) -> Optional[str]:
+        """쿼리에서 종목명 추출"""
+        stock_names = [
+            '삼성전자', '네이버', '카카오', 'SK하이닉스', 'LG화학',
+            '현대차', 'POSCO', '기아', 'LG전자', '삼성바이오로직스'
+        ]
+        
+        for name in stock_names:
+            if name in query:
+                return name
+        
+        return None
     
     def _extract_stock_symbol(self, query: str) -> Optional[str]:
         """쿼리에서 주식 심볼 추출"""

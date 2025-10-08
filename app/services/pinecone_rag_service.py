@@ -101,6 +101,41 @@ def search_pinecone(query: str, top_k: int = None, namespace: str = None):
         return None
 
 
+def get_context_for_query(query: str, top_k: int = 5, namespace: str = None):
+    """쿼리에 대한 컨텍스트 반환 (namespace 지원)"""
+    try:
+        results = search_pinecone(query, top_k=top_k, namespace=namespace)
+        
+        # results가 None인 경우 처리
+        if results is None:
+            print("⚠️ Pinecone 검색 결과가 None입니다")
+            return ""
+        
+        if results and hasattr(results, 'matches') and results.matches:
+            context_parts = []
+            for match in results.matches:
+                text = match.metadata.get("text", "") if hasattr(match, 'metadata') else ""
+                if text:
+                    context_parts.append(text)
+            
+            if context_parts:
+                context = "\n".join(context_parts)
+                print(f"✅ Pinecone에서 {len(context_parts)}개 문서 검색 완료 (namespace: {namespace or 'default'})")
+                return context
+            else:
+                print("ℹ️ Pinecone에서 관련 문서를 찾을 수 없습니다 (텍스트 없음)")
+                return ""
+        else:
+            print("ℹ️ Pinecone에서 관련 문서를 찾을 수 없습니다")
+            return ""
+            
+    except Exception as e:
+        print(f"❌ 컨텍스트 검색 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        return ""
+
+
 class PineconeRAGService:
     """Pinecone 기반 RAG 서비스 (기존 시스템과 호환)"""
     

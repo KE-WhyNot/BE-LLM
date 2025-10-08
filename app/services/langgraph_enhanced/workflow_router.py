@@ -446,13 +446,38 @@ class WorkflowRouter:
         return self._execute_agent("data_agent", state, handle_success)
     
     def _analysis_agent_node(self, state: WorkflowState) -> WorkflowState:
-        """분석 에이전트 노드"""
-        def handle_success(s, r):
-            s["analysis_result"] = r['analysis_result']
-            if r.get('financial_data'):
-                s["financial_data"] = r['financial_data']
-            print(f"📈 투자 분석 완료: {r.get('stock_symbol', '일반')}")
-        return self._execute_agent("analysis_agent", state, handle_success)
+        """분석 에이전트 노드 (async 처리 - RAG + 뉴스 통합)"""
+        try:
+            import asyncio
+            agent = self.agents["analysis_agent"]
+            
+            # 새 이벤트 루프에서 실행
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    agent.process(state["user_query"], state["query_analysis"])
+                )
+                
+                if result['success']:
+                    state["analysis_result"] = result['analysis_result']
+                    if result.get('financial_data'):
+                        state["financial_data"] = result['financial_data']
+                    print(f"📈 통합 투자 분석 완료: {result.get('stock_symbol', '일반')}")
+                    print(f"   - RAG 컨텍스트: {result.get('rag_context_length', 0)} 글자")
+                    print(f"   - 뉴스: {result.get('news_count', 0)}건")
+                else:
+                    state["error"] = result.get('error', 'analysis_agent 실패')
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            print(f"❌ analysis_agent 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            state["error"] = f"analysis_agent 오류: {str(e)}"
+        
+        return state
     
     def _news_agent_node(self, state: WorkflowState) -> WorkflowState:
         """뉴스 에이전트 노드 (async 처리)"""

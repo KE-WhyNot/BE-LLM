@@ -1,21 +1,24 @@
 """
 지식 에이전트
-금융 지식, 용어 설명, 교육 전문 에이전트
+금융 지식, 용어 설명, 교육 전문 에이전트 (네임스페이스 기반 세분화)
 """
 
 from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
+from app.services.pinecone_rag_service import search_pinecone, get_context_for_query
+from app.services.pinecone_config import KNOWLEDGE_NAMESPACES, NAMESPACE_DESCRIPTIONS
 
 
 class KnowledgeAgent(BaseAgent):
-    """📚 지식 에이전트 - 금융 교육 전문가"""
+    """📚 지식 에이전트 - 금융 교육 전문가 (네임스페이스 라우팅)"""
     
     def __init__(self):
         super().__init__(purpose="knowledge")
         self.agent_name = "knowledge_agent"
         
-        # 금융 지식 데이터베이스
-        self.knowledge_db = self._load_knowledge_database()
+        # 네임스페이스 매핑
+        self.namespaces = KNOWLEDGE_NAMESPACES
+        self.namespace_descriptions = NAMESPACE_DESCRIPTIONS
     
     def _load_knowledge_database(self) -> Dict[str, Dict[str, Any]]:
         """금융 지식 데이터베이스 로드"""
@@ -322,12 +325,98 @@ related_topics: [값]"""
         
         return "\n".join(formatted)
     
+    def _determine_namespace(self, user_query: str, query_analysis: Dict[str, Any]) -> str:
+        """쿼리 분석을 통해 적절한 네임스페이스 결정"""
+        
+        # LLM 기반 네임스페이스 분류
+        classification_prompt = f"""당신은 금융 질문을 분석하여 적절한 지식 카테고리를 결정하는 전문가입니다.
+
+사용자 질문: "{user_query}"
+
+다음 카테고리 중 가장 적합한 것을 선택하세요:
+
+1. **terminology** (용어): 금융 용어의 정의, 개념 설명, "~이 뭐야?", "~란?" 등의 질문
+   - 예: "PER이 뭐야?", "ROE란 무엇인가요?", "분산투자의 의미는?"
+   - 키워드: 뭐야, 무엇, 의미, 정의, 개념, 란, 이란
+   
+2. **financial_analysis** (재무분석): 재무제표 분석, 경제 동향, 기업 실적, 재무 지표 해석
+   - 예: "재무제표 보는 법", "PER 분석 방법", "경제 동향 분석", "기업 실적 평가"
+   - 키워드: 재무제표, 경제 동향, 분석 방법, 실적, 재무 지표
+   
+3. **youth_policy** (청년정책): 청년 금융 지원, 정부 정책, 청년 혜택, 청년 대상 금융상품
+   - 예: "청년 대출 정책", "청년 저축 계좌", "청년 지원금", "청년 우대 금리"
+   - 키워드: 청년, 청년대상, 청년지원, 청년우대, 청년정책
+   
+4. **general** (일반): 투자 전략, 리스크 관리, 포트폴리오 구성, 일반 금융 지식
+   - 예: "투자 전략", "리스크 관리 방법", "포트폴리오 구성법"
+   - 키워드: 투자 전략, 리스크, 포트폴리오, 자산 배분
+
+**중요**: "청년"이라는 단어가 포함되어 있으면 반드시 **youth_policy**로 분류하세요!
+
+다음 형식으로만 응답하세요:
+category: [terminology/financial_analysis/youth_policy/general]
+confidence: [0.0-1.0]
+reasoning: [선택한 이유]"""
+
+        try:
+            response = self.llm.invoke(classification_prompt)
+            response_text = response.content.strip()
+            
+            # 파싱
+            category = "general"  # 기본값
+            for line in response_text.split('\n'):
+                if line.startswith('category:'):
+                    category = line.split(':', 1)[1].strip()
+                    break
+            
+            # 유효성 검사
+            if category not in self.namespaces:
+                category = "general"
+            
+            namespace = self.namespaces[category]
+            self.log(f"네임스페이스 결정: {category} -> {namespace}")
+            
+            return namespace
+            
+        except Exception as e:
+            self.log(f"네임스페이스 결정 오류: {e}, 기본값 사용")
+            return self.namespaces["general"]
+    
+    def _get_rag_context(self, user_query: str, namespace: str, top_k: int = 5) -> str:
+        """특정 네임스페이스에서 RAG 컨텍스트 가져오기"""
+        try:
+            self.log(f"RAG 검색 시작: {namespace} (top_k={top_k})")
+            
+            # Pinecone에서 검색
+            context = get_context_for_query(
+                query=user_query,
+                top_k=top_k,
+                namespace=namespace
+            )
+            
+            if context and len(context) > 0:
+                self.log(f"RAG 컨텍스트 발견: {len(context)} 글자")
+                return context
+            else:
+                self.log("RAG 컨텍스트 없음")
+                return ""
+                
+        except Exception as e:
+            self.log(f"RAG 검색 오류: {e}")
+            return ""
+    
     def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """지식 에이전트 처리"""
+        """지식 에이전트 처리 (네임스페이스 라우팅)"""
         try:
             self.log(f"지식 교육 시작: {user_query}")
             
-            # LLM이 교육 전략 결정
+            # 1. 네임스페이스 결정
+            namespace = self._determine_namespace(user_query, query_analysis)
+            
+            # 2. RAG 컨텍스트 가져오기
+            rag_context = self._get_rag_context(user_query, namespace, top_k=5)
+            
+            # 3. LLM이 교육 전략 결정
             prompt = self.get_prompt_template().format(
                 user_query=user_query,
                 primary_intent=query_analysis.get('primary_intent', 'knowledge'),
@@ -338,32 +427,51 @@ related_topics: [값]"""
             response = self.llm.invoke(prompt)
             strategy = self.parse_education_strategy(response.content.strip())
             
-            # 개념 추출
-            concept = self._extract_concept(user_query)
-            knowledge_data = self.knowledge_db.get(concept, {})
-            
-            # 지식 설명 생성
-            if knowledge_data:
-                explanation_prompt = self.generate_knowledge_explanation_prompt(concept, knowledge_data, strategy, user_query)
+            # 4. RAG 컨텍스트 기반 설명 생성
+            if rag_context:
+                explanation_prompt = f"""당신은 {strategy.get('difficulty_level', 'beginner')} 수준의 금융 교육 전문가입니다.
+
+## 사용자 질문
+"{user_query}"
+
+## 관련 지식 (네임스페이스: {namespace})
+{rag_context}
+
+## 교육 전략
+- 난이도: {strategy.get('difficulty_level', 'beginner')}
+- 설명 스타일: {strategy.get('explanation_style', 'simple')}
+- 예시 포함: {'예' if strategy.get('include_examples', True) else '아니오'}
+
+## 응답 요구사항
+1. 위의 관련 지식을 바탕으로 사용자의 질문에 답변하세요
+2. {strategy.get('explanation_style', 'simple')}한 설명 스타일을 유지하세요
+3. 난이도 {strategy.get('difficulty_level', 'beginner')}에 맞게 설명하세요
+4. 실제 예시를 포함하여 이해하기 쉽게 설명하세요
+5. 투자에 실질적으로 도움이 되는 내용을 제공하세요
+
+명확하고 구체적으로 설명해주세요."""
+                
                 explanation_response = self.llm.invoke(explanation_prompt)
                 explanation_result = explanation_response.content
                 
-                self.log(f"지식 교육 완료: {concept}")
+                self.log(f"RAG 기반 지식 교육 완료")
             else:
-                # 데이터베이스에 없는 개념의 경우 일반적인 설명
+                # RAG 컨텍스트가 없는 경우 일반 설명
                 explanation_result = self._generate_general_explanation(user_query, strategy)
                 self.log(f"일반 지식 설명 완료")
             
             return {
                 'success': True,
-                'concept': concept,
+                'namespace': namespace,
+                'rag_context_length': len(rag_context),
                 'explanation_result': explanation_result,
-                'strategy': strategy,
-                'knowledge_data': knowledge_data
+                'strategy': strategy
             }
             
         except Exception as e:
             self.log(f"지식 에이전트 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': f"지식 교육 중 오류: {str(e)}",
