@@ -51,7 +51,7 @@ def health_check():
         "status": "healthy",
         "timestamp": "2024-01-01T00:00:00Z",
         "services": {
-            "rag_service": "active",
+            "pinecone_rag_service": "active",
             "langchain_agent": "active", 
             "langgraph_workflow": "active",
             "langsmith_monitoring": "active" if settings.langsmith_api_key else "inactive"

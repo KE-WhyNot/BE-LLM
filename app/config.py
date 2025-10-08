@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     neo4j_user: Optional[str] = None
     neo4j_password: Optional[str] = None
     
+    # Pinecone 설정 (Colab 노트북 방식)
+    pinecone_api_key: Optional[str] = None
+    pinecone_index_name: Optional[str] = None
+    embedding_model_name: Optional[str] = None
+    batch_size: Optional[int] = None
+    max_length: Optional[int] = None
+    top_k: Optional[int] = None
+    
     # RSS 피드 설정
     naver_rss_feeds: Optional[str] = None
     daum_rss_feeds: Optional[str] = None

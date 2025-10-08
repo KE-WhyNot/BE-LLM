@@ -22,3 +22,7 @@ class ChatResponse(BaseModel):
     # 차트 이미지 (base64 인코딩, visualization 쿼리 시 사용)
     chart_image: Optional[str] = None
     # 예: "iVBORw0KGgoAAAANSUhEUgAA..." (프론트엔드에서 <img src="data:image/png;base64,{chart_image}" />로 표시)
+    
+    # Pinecone 검색 결과 (Colab 노트북 방식으로 표시)
+    pinecone_results: Optional[list] = None
+    # 예: [{"id": "doc1", "score": 0.85, "metadata": {"text": "...", "source": "..."}}]

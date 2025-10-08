@@ -2,7 +2,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from app.services.chatbot.financial_workflow import financial_workflow
 from app.services.monitoring_service import monitoring_service
-from app.utils.data_processing import knowledge_base_service
+from app.services.pinecone_rag_service import pinecone_rag_service
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 
 class FinancialChatbotService:
@@ -11,15 +11,14 @@ class FinancialChatbotService:
     def __init__(self):
         self.financial_workflow = financial_workflow
         self.monitoring_service = monitoring_service
-        self.knowledge_base_service = knowledge_base_service
+        self.pinecone_rag_service = pinecone_rag_service
         self._initialize_services()
     
     def _initialize_services(self):
         """서비스 초기화"""
         try:
-            # 지식 베이스 구축
-            # 실제 구현된 메서드로 정정
-            self.knowledge_base_service.build_from_data_directory()
+            # Pinecone RAG 서비스 초기화
+            self.pinecone_rag_service.initialize()
             print("금융 전문가 챗봇 서비스가 초기화되었습니다.")
         except Exception as e:
             print(f"서비스 초기화 중 오류: {e}")
@@ -64,11 +63,23 @@ class FinancialChatbotService:
                 if "chart" in result.get("action_data", {}):
                     chart_image = result["action_data"]["chart"]
                 
+                # Pinecone 검색 결과 가져오기 (Colab 노트북 방식)
+                pinecone_results = None
+                try:
+                    # 사용자 메시지로 Pinecone 검색
+                    search_results = self.pinecone_rag_service.search(user_message, top_k=5)
+                    if search_results:
+                        pinecone_results = search_results
+                        print(f"✅ Pinecone에서 {len(search_results)}개 문서 검색 완료")
+                except Exception as e:
+                    print(f"⚠️ Pinecone 검색 중 오류 (무시하고 계속): {e}")
+                
                 return ChatResponse(
                     reply_text=result["reply_text"],
                     action_type=result["action_type"],
                     action_data=result["action_data"],
-                    chart_image=chart_image
+                    chart_image=chart_image,
+                    pinecone_results=pinecone_results
                 )
             else:
                 return self._create_error_response(result["reply_text"])

@@ -9,13 +9,12 @@ from datetime import datetime
 import asyncio
 
 from app.config import settings
-from app.services.workflow_components.query_classifier_service import query_classifier
 from app.services.workflow_components.financial_data_service import financial_data_service
 from app.services.workflow_components.analysis_service import analysis_service
 from app.services.workflow_components.news_service import news_service
 from app.services.workflow_components.response_generator_service import response_generator
 from app.services.workflow_components.visualization_service import visualization_service
-from app.services.rag_service import rag_service
+from app.services.pinecone_rag_service import pinecone_rag_service
 from app.services.langgraph_enhanced.llm_manager import LLMManager
 
 # 간소화된 지능형 워크플로우 (선택적 사용)
@@ -100,7 +99,7 @@ class FinancialWorkflowService:
                 "news": "get_news",
                 "knowledge": "search_knowledge",
                 "visualization": "get_financial_data",  # 시각화도 먼저 데이터 조회
-                "general": "generate_response",
+                "general": "search_knowledge",  # general도 RAG 검색 후 응답
                 "error": "handle_error"
             }
         )
@@ -137,14 +136,105 @@ class FinancialWorkflowService:
         return workflow.compile()
     
     def _classify_query(self, state: FinancialWorkflowState) -> FinancialWorkflowState:
-        """쿼리 분류 - query_classifier_service 호출"""
+        """쿼리 분류 - LLM 기반 동적 분류"""
         query = state["user_query"]
-        query_type = query_classifier.classify(query)
+        
+        # LLM을 사용한 동적 쿼리 분류
+        if self.llm:
+            try:
+                classification_prompt = f"""당신은 금융 챗봇의 쿼리 분류 전문가입니다. 사용자의 질문을 분석하여 적절한 카테고리로 분류해주세요.
+
+사용자 질문: "{query}"
+
+분류 카테고리:
+1. data: 주가, 가격, 시세 등 실시간 금융 데이터 조회
+2. analysis: 종목 분석, 투자 의견, 전망, 매수/매도 추천
+3. news: 뉴스, 소식, 최근 기사 관련 질문
+4. knowledge: 금융 용어 설명, 개념 이해, 투자 전략 학습
+5. visualization: 차트, 그래프 요청
+6. general: 위 카테고리에 해당하지 않는 일반적인 대화
+
+다음 형식으로만 응답하세요 (JSON 형식):
+{{
+  "category": "카테고리명",
+  "confidence": 0.0-1.0,
+  "reasoning": "분류 근거"
+}}
+
+예시:
+질문: "삼성전자 주가 알려줘"
+{{"category": "data", "confidence": 0.95, "reasoning": "실시간 주가 조회 요청"}}
+
+질문: "PER이 뭐야?"
+{{"category": "knowledge", "confidence": 0.9, "reasoning": "금융 용어 설명 요청"}}
+
+질문: "네이버 투자해도 될까?"
+{{"category": "analysis", "confidence": 0.9, "reasoning": "투자 의견 요청"}}
+"""
+                
+                response = self.llm.invoke(classification_prompt)
+                response_text = response.content.strip()
+                
+                # JSON 파싱
+                import json
+                import re
+                
+                # JSON 추출 (코드 블록이나 불필요한 텍스트 제거)
+                json_match = re.search(r'\{[^}]+\}', response_text)
+                if json_match:
+                    result = json.loads(json_match.group())
+                    
+                    category = result.get("category", "general")
+                    confidence = result.get("confidence", 0.0)
+                    reasoning = result.get("reasoning", "")
+                    
+                    print(f"🤖 LLM 쿼리 분류: '{query}' -> {category} (신뢰도: {confidence:.2f})")
+                    print(f"   근거: {reasoning}")
+                    
+                    # 신뢰도가 낮으면 폴백
+                    if confidence < 0.6:
+                        print("   ⚠️ 신뢰도 낮음, 폴백 로직 사용")
+                        query_type = self._fallback_classification(query)
+                    else:
+                        query_type = category
+                else:
+                    print("   ❌ JSON 파싱 실패, 폴백 로직 사용")
+                    query_type = self._fallback_classification(query)
+                    
+            except Exception as e:
+                print(f"❌ LLM 분류 중 오류: {e}")
+                query_type = self._fallback_classification(query)
+        else:
+            # LLM이 없으면 폴백 로직 사용
+            query_type = self._fallback_classification(query)
         
         state["query_type"] = query_type
         state["next_step"] = query_type
         
         return state
+    
+    def _fallback_classification(self, query: str) -> str:
+        """폴백: 키워드 기반 분류 (LLM 실패 시)"""
+        query_lower = query.lower()
+        
+        # 1. 주가/데이터 조회
+        if any(keyword in query_lower for keyword in ['주가', '가격', '시세', '현재가', '종가', '시가']):
+            return "data"
+        # 2. 차트/시각화
+        elif any(keyword in query_lower for keyword in ['차트', '그래프', '시각화']):
+            return "visualization"
+        # 3. 뉴스
+        elif any(keyword in query_lower for keyword in ['뉴스', '소식', '기사']):
+            return "news"
+        # 4. 분석
+        elif any(keyword in query_lower for keyword in ['분석', '전망', '예측', '투자', '매수', '매도']):
+            return "analysis"
+        # 5. 금융 지식 (용어, 개념 등)
+        elif any(keyword in query_lower for keyword in ['뭐야', '이란', '설명', '의미', '이해', '알려줘']) or \
+             any(char in query for char in ['?', '？']):
+            return "knowledge"
+        else:
+            return "general"
     
     def _route_after_classification(self, state: FinancialWorkflowState) -> str:
         """분류 후 라우팅"""
@@ -324,17 +414,33 @@ search_query: 오늘 하루 시장 뉴스"""
         return "오늘 하루 시장 뉴스"
     
     def _search_knowledge(self, state: FinancialWorkflowState) -> FinancialWorkflowState:
-        """지식 검색 - rag_service 호출"""
+        """지식 검색 - pinecone_rag_service 호출"""
         try:
             query = state["user_query"]
-            context = rag_service.get_context_for_query(query)
+            print(f"🔍 지식 검색 시작: '{query}'")
+            
+            context = pinecone_rag_service.get_context_for_query(query, top_k=5)
+            
+            # None이나 빈 문자열 처리
+            if context is None:
+                print("⚠️ context가 None입니다")
+                context = ""
+            elif not context:
+                print("⚠️ context가 빈 문자열입니다")
+            else:
+                print(f"✅ context 검색 성공: {len(context)}자, 미리보기: {context[:100]}...")
+            
             state["knowledge_context"] = context
             state["next_step"] = "generate_response"
             
         except Exception as e:
             from app.utils.common_utils import ErrorHandler
+            print(f"❌ 지식 검색 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            state["knowledge_context"] = ""  # 오류 시 빈 문자열
             state["error"] = ErrorHandler.handle_workflow_error(e, "지식 검색")
-            state["next_step"] = "error"
+            state["next_step"] = "generate_response"  # 오류가 있어도 응답 생성 시도
         
         return state
     
@@ -378,7 +484,15 @@ search_query: 오늘 하루 시장 뉴스"""
                     
             elif query_type == "knowledge" and "knowledge_context" in state:
                 final_response = response_generator.generate_knowledge_response(
-                    state["knowledge_context"]
+                    state["knowledge_context"],
+                    user_query=state["user_query"]
+                )
+            
+            elif query_type == "general" and "knowledge_context" in state:
+                # general도 RAG 컨텍스트 활용
+                final_response = response_generator.generate_general_response(
+                    user_query=state["user_query"],
+                    rag_context=state["knowledge_context"]
                 )
             
             elif query_type == "visualization" and "chart_data" in state:
@@ -392,8 +506,12 @@ search_query: 오늘 하루 시장 뉴스"""
                 final_response = viz_response.get("text", "차트가 생성되었습니다.")
                 
             else:
-                # 일반적인 질문에 대한 응답
-                final_response = response_generator.generate_general_response()
+                # 일반적인 질문에 대한 응답 (RAG 컨텍스트가 있으면 활용)
+                rag_context = state.get("knowledge_context", "")
+                final_response = response_generator.generate_general_response(
+                    user_query=state["user_query"],
+                    rag_context=rag_context
+                )
             
             # 빈 응답 방지 폴백
             if not final_response or len(final_response.strip()) < 10:
@@ -438,7 +556,6 @@ search_query: 오늘 하루 시장 뉴스"""
     def _should_use_intelligent_workflow(self, user_message: str) -> bool:
         """LLM 기반 에이전트 시스템 사용 여부 결정"""
         # 모든 요청을 LLM 기반 에이전트 시스템으로 처리
-        print(f"🤖 LLM 기반 에이전트 시스템 사용")
         return True
     
     def _process_with_intelligent_workflow(self, user_query: str, user_id: Optional[str]) -> Dict[str, Any]:

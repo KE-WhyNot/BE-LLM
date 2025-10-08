@@ -2,4 +2,6 @@
 /build/
 /src/main/resources/secret/
 /.gradle/
-/.env
+/.env*.log
+__pycache__/
+logs/

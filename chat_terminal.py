@@ -68,6 +68,17 @@ class ChatTerminal:
         
         print("\n" + "="*60)
         
+        # Pinecone 검색 결과가 있는 경우 (Colab 노트북 방식으로 표시)
+        if "pinecone_results" in response:
+            pinecone_data = response["pinecone_results"]
+            print(f"📊 검색 결과: {len(pinecone_data)}개")
+            
+            for i, match in enumerate(pinecone_data[:3]):  # 상위 3개만 표시
+                print(f"   [{i+1}] 점수: {match.get('score', 0):.4f}")
+                print(f"       소스: {match.get('metadata', {}).get('source', 'N/A')}")
+                print(f"       내용: {match.get('metadata', {}).get('text', '')[:100]}...")
+                print()
+        
         # reply_text 우선 (새 API 응답 형식)
         if "reply_text" in response:
             print(f"🤖 {response['reply_text']}")
@@ -102,6 +113,12 @@ class ChatTerminal:
         print("  - '금융 뉴스 알려줘'")
         print("  - '투자 조언해줘'")
         print()
+        print("🔍 Pinecone DB 검색 예시:")
+        print("  - '바뀐 통화 정책'")
+        print("  - '금리 변화'")
+        print("  - '경제 동향'")
+        print("  - '투자 전략'")
+        print()
         print("🔧 명령어:")
         print("  - help: 이 도움말 표시")
         print("  - history: 대화 히스토리 표시")
@@ -129,6 +146,10 @@ class ChatTerminal:
                 print(f"   🤖 응답: {preview}{'...' if len(bot_response['response']) > 150 else ''}")
             elif "error" in bot_response:
                 print(f"   ❌ 오류: {bot_response['error']}")
+            
+            # Pinecone 검색 결과 표시
+            if "pinecone_results" in bot_response and bot_response["pinecone_results"]:
+                print(f"   🔍 Pinecone 검색: {len(bot_response['pinecone_results'])}개 결과")
             
             # 추가 정보
             action_data = bot_response.get("action_data", {})

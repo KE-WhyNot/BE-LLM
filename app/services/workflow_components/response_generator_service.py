@@ -137,11 +137,12 @@ class ResponseGeneratorService:
         except Exception as e:
             return f"❌ 뉴스 응답 생성 중 오류가 발생했습니다: {str(e)}\n\n잠시 후 다시 시도해주세요."
     
-    def generate_knowledge_response(self, knowledge_context: str) -> str:
-        """지식 검색 응답 생성
+    def generate_knowledge_response(self, knowledge_context: str, user_query: str = "") -> str:
+        """지식 검색 응답 생성 - LLM을 사용하여 컨텍스트 기반 답변 생성
         
         Args:
             knowledge_context: 검색된 지식 컨텍스트
+            user_query: 사용자 질문
             
         Returns:
             str: 응답 텍스트
@@ -172,8 +173,34 @@ class ResponseGeneratorService:
 - "기술적 분석이란?"
 """
             
-            # 지식 컨텍스트 포맷팅
-            response = f"📚 **금융 지식 검색 결과**\n\n{knowledge_context}"
+            # LLM을 사용하여 컨텍스트 기반 답변 생성
+            if user_query and self.llm:
+                prompt = f"""당신은 금융 전문가입니다. 사용자의 질문에 대해 제공된 컨텍스트를 바탕으로 명확하고 이해하기 쉽게 설명해주세요.
+
+사용자 질문: {user_query}
+
+참고 자료:
+{knowledge_context}
+
+위 참고 자료를 바탕으로 사용자의 질문에 답변해주세요. 다음 형식을 따라주세요:
+
+1. **용어/개념 정의**: 핵심 개념을 명확하게 설명
+2. **구체적 예시**: 실생활이나 투자에서의 활용 예시
+3. **추가 팁**: 관련된 유용한 정보나 주의사항
+
+답변은 친절하고 이해하기 쉽게 작성하되, 전문성을 유지해주세요.
+"""
+                
+                try:
+                    llm_response = self.llm.invoke(prompt)
+                    return f"📚 **금융 지식 답변**\n\n{llm_response.content}"
+                except Exception as e:
+                    print(f"⚠️ LLM 응답 생성 실패, 폴백 사용: {e}")
+                    # LLM 실패 시 폴백: 컨텍스트 직접 반환
+                    return f"📚 **금융 지식 검색 결과**\n\n{knowledge_context[:1000]}"
+            
+            # user_query가 없거나 LLM이 없으면 컨텍스트 직접 반환
+            response = f"📚 **금융 지식 검색 결과**\n\n{knowledge_context[:1000]}"
             
             # 추가 학습 리소스 제안
             response += "\n\n" + self._get_learning_resources_tip()
@@ -183,12 +210,45 @@ class ResponseGeneratorService:
         except Exception as e:
             return f"❌ 지식 응답 생성 중 오류가 발생했습니다: {str(e)}"
     
-    def generate_general_response(self) -> str:
-        """일반적인 응답 생성
+    def generate_general_response(self, user_query: str = "", rag_context: str = "") -> str:
+        """일반적인 응답 생성 - RAG 컨텍스트가 있으면 활용
         
+        Args:
+            user_query: 사용자 질문
+            rag_context: Pinecone RAG 검색 결과 컨텍스트
+            
         Returns:
             str: 응답 텍스트
         """
+        # RAG 컨텍스트가 있고 사용자 질문이 있으면 LLM을 사용한 답변 생성
+        if user_query and rag_context and rag_context.strip() and self.llm:
+            try:
+                prompt = f"""당신은 친절한 금융 전문가 AI 어시스턴트입니다. 사용자의 질문에 대해 제공된 참고 자료를 활용하여 도움이 되는 답변을 생성해주세요.
+
+사용자 질문: {user_query}
+
+참고 자료:
+{rag_context}
+
+위 참고 자료가 질문과 관련이 있다면 이를 바탕으로 답변하고, 관련이 없다면 일반적인 금융 지식으로 답변해주세요.
+
+답변 형식:
+- 질문에 직접적으로 답변
+- 필요시 추가 설명이나 예시 제공
+- 더 구체적인 질문을 유도하는 팁 제공
+
+답변은 친절하고 이해하기 쉽게 작성해주세요.
+"""
+                
+                llm_response = self.llm.invoke(prompt)
+                return llm_response.content
+                
+            except Exception as e:
+                print(f"⚠️ General 응답 LLM 생성 실패: {e}")
+                # LLM 실패 시 기본 응답
+                pass
+        
+        # 기본 응답 (RAG 컨텍스트가 없거나 LLM이 없을 때)
         return """👋 **안녕하세요! 금융 전문가 AI 챗봇입니다.**
 
 저는 다음과 같은 분야에서 도움을 드릴 수 있습니다:
