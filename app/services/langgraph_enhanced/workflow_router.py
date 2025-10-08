@@ -322,23 +322,53 @@ class WorkflowRouter:
         try:
             user_query = state["user_query"]
             
-            # 모든 수집된 데이터 정리
-            collected_data = {
-                'financial_data': state.get('financial_data', {}),
-                'analysis_result': state.get('analysis_result', ''),
-                'news_data': state.get('news_data', []),
-                'news_analysis': state.get('news_analysis', ''),
-                'knowledge_context': state.get('knowledge_context', ''),
-                'chart_data': state.get('chart_data', {}),
-                'chart_analysis': state.get('chart_analysis', '')
-            }
+            # 에이전트별로 결과 구조화
+            agent_results = {}
             
-            print(f"🔗 결과 통합 시작...")
+            # 데이터 에이전트 결과
+            if state.get('financial_data'):
+                agent_results['data_agent'] = {
+                    'success': True,
+                    'financial_data': state['financial_data']
+                }
+            
+            # 분석 에이전트 결과
+            if state.get('analysis_result'):
+                agent_results['analysis_agent'] = {
+                    'success': True,
+                    'analysis_result': state['analysis_result']
+                }
+            
+            # 뉴스 에이전트 결과
+            if state.get('news_data') or state.get('news_analysis'):
+                agent_results['news_agent'] = {
+                    'success': True,
+                    'news_data': state.get('news_data', []),
+                    'news_analysis': state.get('news_analysis', '')
+                }
+            
+            # 지식 에이전트 결과
+            if state.get('knowledge_context'):
+                agent_results['knowledge_agent'] = {
+                    'success': True,
+                    'explanation_result': state['knowledge_context']
+                }
+            
+            # 시각화 에이전트 결과
+            if state.get('chart_data'):
+                agent_results['visualization_agent'] = {
+                    'success': True,
+                    'chart_data': state['chart_data'],
+                    'chart_analysis': state.get('chart_analysis', '')
+                }
+            
+            print(f"🔗 결과 통합 시작... (에이전트: {list(agent_results.keys())})")
             
             # process 메서드 사용
             combined_result = self.result_combiner.process(
                 user_query,
-                collected_data
+                agent_results,
+                state.get('query_analysis', {})
             )
             
             state["combined_result"] = combined_result
@@ -425,12 +455,39 @@ class WorkflowRouter:
         return self._execute_agent("analysis_agent", state, handle_success)
     
     def _news_agent_node(self, state: WorkflowState) -> WorkflowState:
-        """뉴스 에이전트 노드"""
+        """뉴스 에이전트 노드 (async 처리)"""
         def handle_success(s, r):
             s["news_data"] = r['news_data']
             s["news_analysis"] = r['analysis_result']
             print(f"📰 뉴스 수집 및 분석 완료: {len(r['news_data'])}건")
-        return self._execute_agent("news_agent", state, handle_success)
+        
+        # NewsAgent가 async이므로 asyncio로 실행
+        try:
+            import asyncio
+            agent = self.agents["news_agent"]
+            
+            # 새 이벤트 루프에서 실행
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    agent.process(state["user_query"], state["query_analysis"])
+                )
+                
+                if result['success']:
+                    handle_success(state, result)
+                else:
+                    state["error"] = result.get('error', 'news_agent 실패')
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            print(f"❌ news_agent 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            state["error"] = f"news_agent 오류: {str(e)}"
+        
+        return state
     
     def _knowledge_agent_node(self, state: WorkflowState) -> WorkflowState:
         """지식 에이전트 노드"""

@@ -128,14 +128,31 @@ class ParallelExecutor:
             }
     
     def _execute_agent_sync(self, agent: Any, state: Dict[str, Any]) -> Dict[str, Any]:
-        """동기 에이전트 실행"""
+        """동기/비동기 에이전트 실행 (async 에이전트 지원)"""
         try:
             user_query = state.get('user_query', '')
             query_analysis = state.get('query_analysis', {})
             
             # 에이전트의 process 메서드 호출
             if hasattr(agent, 'process'):
-                result = agent.process(user_query, query_analysis)
+                import asyncio
+                import inspect
+                
+                # async 메서드인지 확인
+                if inspect.iscoroutinefunction(agent.process):
+                    # async 함수는 새 이벤트 루프에서 실행
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(
+                            agent.process(user_query, query_analysis)
+                        )
+                    finally:
+                        loop.close()
+                else:
+                    # 동기 함수는 바로 호출
+                    result = agent.process(user_query, query_analysis)
+                
                 return result
             else:
                 return {
@@ -144,6 +161,8 @@ class ParallelExecutor:
                 }
                 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': str(e)

@@ -189,8 +189,8 @@ focus_areas: [값]"""
         
         return "\n".join(formatted)
     
-    def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """뉴스 에이전트 처리"""
+    async def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """뉴스 에이전트 처리 (async)"""
         try:
             self.log(f"뉴스 수집 시작: {user_query}")
             
@@ -205,39 +205,26 @@ focus_areas: [값]"""
             response = self.llm.invoke(prompt)
             strategy = self.parse_news_strategy(response.content.strip())
             
-            # 실제 뉴스 수집
+            # 실제 뉴스 수집 (async)
             news_data = []
+            mk_context = ""  # 매일경제 컨텍스트는 별도로 저장
+            
             try:
-                import asyncio
-                
-                # 이벤트 루프 안전하게 처리
-                def run_async_safely(coro):
-                    try:
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            # 이미 실행 중인 루프가 있으면 nest_asyncio 사용
-                            import nest_asyncio
-                            nest_asyncio.apply()
-                        return loop.run_until_complete(coro)
-                    except RuntimeError:
-                        # 루프가 없으면 새로 생성
-                        return asyncio.run(coro)
-                
                 if strategy['news_sources'] in ['google', 'both']:
-                    # async 함수를 동기로 실행
-                    google_news = run_async_safely(news_service.get_comprehensive_news(
+                    # async 함수 직접 호출 - 리스트 반환
+                    google_news = await news_service.get_comprehensive_news(
                         query=strategy['search_query']
-                    ))
-                    if google_news and 'news' in google_news:
-                        news_data.extend(google_news['news'])
+                    )
+                    
+                    if google_news and isinstance(google_news, list):
+                        news_data.extend(google_news)
                 
                 if strategy['news_sources'] in ['mk', 'both']:
-                    mk_news = news_service.get_analysis_context_from_kg(
+                    # async 함수 호출 - 문자열 반환
+                    mk_context = await news_service.get_analysis_context_from_kg(
                         query=strategy['search_query'],
                         limit=5
                     )
-                    if mk_news:
-                        news_data.extend(mk_news)
                 
                 # 중복 제거 및 정렬
                 news_data = self._deduplicate_news(news_data)
@@ -247,10 +234,16 @@ focus_areas: [값]"""
                 import traceback
                 traceback.print_exc()
                 news_data = []
+                mk_context = ""
             
             # 뉴스 분석
-            if news_data:
+            if news_data or mk_context:
                 analysis_prompt = self.generate_news_analysis_prompt(news_data, strategy, user_query)
+                
+                # 매일경제 컨텍스트 추가
+                if mk_context:
+                    analysis_prompt += f"\n\n{mk_context}"
+                
                 analysis_response = self.llm.invoke(analysis_prompt)
                 analysis_result = analysis_response.content
                 
@@ -263,7 +256,8 @@ focus_areas: [값]"""
                 'success': True,
                 'news_data': news_data,
                 'analysis_result': analysis_result,
-                'strategy': strategy
+                'strategy': strategy,
+                'mk_context': mk_context
             }
             
         except Exception as e:
