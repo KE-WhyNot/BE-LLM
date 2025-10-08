@@ -15,18 +15,16 @@ DEFAULT_NAMESPACE = "cat_financial_statements"
 
 # 지식 에이전트 전용 네임스페이스 매핑
 KNOWLEDGE_NAMESPACES = {
-    "terminology": "cat_financial_terminology",  # 금융 용어 설명
+    "terminology": "cat_finance_baseknowledge",  # 금융 용어 설명
     "financial_analysis": "cat_financial_statements",  # 재무제표 & 경제동향
-    "youth_policy": "cat_youth_policy",  # 청년 정책
-    "general": "cat_general_knowledge"  # 일반 금융 지식
+    "youth_policy": "cat_finance_policy"  # 청년 정책
 }
 
 # 네임스페이스별 설명
 NAMESPACE_DESCRIPTIONS = {
-    "cat_financial_terminology": "금융 용어, 개념, 정의 관련",
+    "cat_finance_baseknowledge": "금융 용어, 개념, 정의 관련",
     "cat_financial_statements": "재무제표 분석, 경제 동향, 기업 실적",
-    "cat_youth_policy": "청년 금융 지원, 정부 정책, 청년 혜택",
-    "cat_general_knowledge": "일반 금융 지식, 투자 전략, 리스크 관리"
+    "cat_finance_policy": "청년 금융 지원, 정부 정책, 청년 혜택"
 }
 
 print(f"📊 Pinecone 설정:")

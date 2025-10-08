@@ -336,7 +336,7 @@ related_topics: [값]"""
 다음 카테고리 중 가장 적합한 것을 선택하세요:
 
 1. **terminology** (용어): 금융 용어의 정의, 개념 설명, "~이 뭐야?", "~란?" 등의 질문
-   - 예: "PER이 뭐야?", "ROE란 무엇인가요?", "분산투자의 의미는?"
+   - 예: "PER이 뭐야?", "ROE란 무엇인가요?", "분산투자의 의미는?", "ETF가 뭐야?"
    - 키워드: 뭐야, 무엇, 의미, 정의, 개념, 란, 이란
    
 2. **financial_analysis** (재무분석): 재무제표 분석, 경제 동향, 기업 실적, 재무 지표 해석
@@ -346,15 +346,11 @@ related_topics: [값]"""
 3. **youth_policy** (청년정책): 청년 금융 지원, 정부 정책, 청년 혜택, 청년 대상 금융상품
    - 예: "청년 대출 정책", "청년 저축 계좌", "청년 지원금", "청년 우대 금리"
    - 키워드: 청년, 청년대상, 청년지원, 청년우대, 청년정책
-   
-4. **general** (일반): 투자 전략, 리스크 관리, 포트폴리오 구성, 일반 금융 지식
-   - 예: "투자 전략", "리스크 관리 방법", "포트폴리오 구성법"
-   - 키워드: 투자 전략, 리스크, 포트폴리오, 자산 배분
 
 **중요**: "청년"이라는 단어가 포함되어 있으면 반드시 **youth_policy**로 분류하세요!
 
 다음 형식으로만 응답하세요:
-category: [terminology/financial_analysis/youth_policy/general]
+category: [terminology/financial_analysis/youth_policy]
 confidence: [0.0-1.0]
 reasoning: [선택한 이유]"""
 
@@ -363,7 +359,7 @@ reasoning: [선택한 이유]"""
             response_text = response.content.strip()
             
             # 파싱
-            category = "general"  # 기본값
+            category = "terminology"  # 기본값
             for line in response_text.split('\n'):
                 if line.startswith('category:'):
                     category = line.split(':', 1)[1].strip()
@@ -371,7 +367,7 @@ reasoning: [선택한 이유]"""
             
             # 유효성 검사
             if category not in self.namespaces:
-                category = "general"
+                category = "terminology"
             
             namespace = self.namespaces[category]
             self.log(f"네임스페이스 결정: {category} -> {namespace}")
@@ -380,7 +376,7 @@ reasoning: [선택한 이유]"""
             
         except Exception as e:
             self.log(f"네임스페이스 결정 오류: {e}, 기본값 사용")
-            return self.namespaces["general"]
+            return self.namespaces["terminology"]
     
     def _get_rag_context(self, user_query: str, namespace: str, top_k: int = 5) -> str:
         """특정 네임스페이스에서 RAG 컨텍스트 가져오기"""
@@ -427,8 +423,9 @@ reasoning: [선택한 이유]"""
             response = self.llm.invoke(prompt)
             strategy = self.parse_education_strategy(response.content.strip())
             
-            # 4. RAG 컨텍스트 기반 설명 생성
+            # 4. 설명 생성
             if rag_context:
+                # RAG 컨텍스트 기반 설명
                 explanation_prompt = f"""당신은 {strategy.get('difficulty_level', 'beginner')} 수준의 금융 교육 전문가입니다.
 
 ## 사용자 질문
@@ -457,8 +454,22 @@ reasoning: [선택한 이유]"""
                 self.log(f"RAG 기반 지식 교육 완료")
             else:
                 # RAG 컨텍스트가 없는 경우 일반 설명
-                explanation_result = self._generate_general_explanation(user_query, strategy)
-                self.log(f"일반 지식 설명 완료")
+                self.log(f"RAG 컨텍스트 없음 - 기본 설명 생성")
+                explanation_prompt = f"""당신은 금융 교육 전문가입니다.
+
+## 사용자 질문
+"{user_query}"
+
+## 응답 요구사항
+1. 사용자의 질문에 대해 일반적인 금융 지식으로 답변하세요
+2. 간단명료하게 설명하세요
+3. 가능하면 예시를 들어 설명하세요
+4. 추가 정보가 필요하면 안내하세요
+
+명확하고 친절하게 설명해주세요."""
+                
+                explanation_response = self.llm.invoke(explanation_prompt)
+                explanation_result = explanation_response.content
             
             return {
                 'success': True,
@@ -501,31 +512,4 @@ reasoning: [선택한 이유]"""
                 return concept
         
         return "일반"
-    
-    def _generate_general_explanation(self, query: str, strategy: Dict[str, Any]) -> str:
-        """일반적인 지식 설명 생성"""
-        return f"""📚 **금융 지식 안내**
-
-"{query}"에 대한 질문을 주셨네요. 
-
-현재 데이터베이스에서 해당 개념을 찾을 수 없어 구체적인 설명을 제공하기 어렵습니다.
-
-**다음과 같은 질문을 해보세요:**
-
-🔹 **기본 지표**
-- "PER이 뭐야?"
-- "PBR 설명해줘"
-- "ROE란 무엇인가요?"
-
-🔹 **투자 전략**
-- "분산투자란?"
-- "기술적 분석이 뭐야?"
-- "밸류 투자란?"
-
-🔹 **기본 개념**
-- "주식이 뭐야?"
-- "배당이란?"
-- "시가총액이 뭐야?"
-
-**더 구체적인 질문을 해주시면 정확한 답변을 드릴 수 있습니다!**"""
 

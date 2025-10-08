@@ -8,6 +8,7 @@ from typing import Dict, Any, TypedDict, List, Optional
 from datetime import datetime
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
+from langsmith import traceable
 
 from .agents import (
     QueryAnalyzerAgent,
@@ -143,6 +144,7 @@ class WorkflowRouter:
         
         return workflow.compile()
     
+    @traceable(name="query_analyzer_step")
     def _query_analyzer_node(self, state: WorkflowState) -> WorkflowState:
         """쿼리 분석 노드"""
         try:
@@ -164,6 +166,7 @@ class WorkflowRouter:
         
         return state
     
+    @traceable(name="service_planner_step")
     def _service_planner_node(self, state: WorkflowState) -> WorkflowState:
         """서비스 계획 노드 - 복잡도 분석 및 실행 전략 수립"""
         try:
@@ -317,6 +320,7 @@ class WorkflowRouter:
         
         return state
     
+    @traceable(name="result_combiner_step")
     def _result_combiner_node(self, state: WorkflowState) -> WorkflowState:
         """결과 통합 노드 - LLM 기반 지능형 결과 통합"""
         try:
@@ -384,6 +388,7 @@ class WorkflowRouter:
         
         return state
     
+    @traceable(name="confidence_calculator_step")
     def _confidence_calculator_node(self, state: WorkflowState) -> WorkflowState:
         """신뢰도 계산 노드 - 응답 품질 평가"""
         try:
@@ -434,6 +439,7 @@ class WorkflowRouter:
         
         return state
     
+    @traceable(name="data_agent_step")
     def _data_agent_node(self, state: WorkflowState) -> WorkflowState:
         """데이터 에이전트 노드"""
         def handle_success(s, r):
@@ -441,6 +447,11 @@ class WorkflowRouter:
             if r.get('is_simple_request'):
                 s["final_response"] = r['simple_response']
                 print(f"⚡ 간단한 주가 응답 생성 완료")
+                # LangSmith에 간단한 응답 경로 기록
+                from langsmith import get_current_run_tree
+                run_tree = get_current_run_tree()
+                if run_tree:
+                    run_tree.add_metadata({"response_type": "simple_stock_price", "bypassed_response_agent": True})
             else:
                 print(f"📊 데이터 조회 완료")
         return self._execute_agent("data_agent", state, handle_success)
@@ -531,11 +542,22 @@ class WorkflowRouter:
             print(f"📊 차트 생성 및 분석 완료")
         return self._execute_agent("visualization_agent", state, handle_success)
     
+    @traceable(name="response_agent_step")
     def _response_agent_node(self, state: WorkflowState) -> WorkflowState:
         """응답 에이전트 노드"""
         try:
+            # 디버그: state 키 확인
+            print(f"🔍 response_agent_node state 키: {list(state.keys())}")
+            print(f"   financial_data 있음: {'financial_data' in state}")
+            if 'financial_data' in state:
+                fd = state['financial_data']
+                print(f"   financial_data 타입: {type(fd)}, 비어있음: {not fd if isinstance(fd, dict) else 'N/A'}")
+            
             # 메타 에이전트의 통합 결과가 있으면 우선 사용
             combined_result = state.get("combined_result", {})
+            print(f"   combined_result 있음: {bool(combined_result)}")
+            print(f"   combined_response 있음: {bool(combined_result.get('combined_response'))}")
+            
             if combined_result.get("combined_response"):
                 state["final_response"] = combined_result["combined_response"]
                 print(f"💬 메타 에이전트 통합 응답 사용")
@@ -552,6 +574,11 @@ class WorkflowRouter:
                 'chart_analysis': state.get('chart_analysis', '')
             }
             
+            print(f"📦 collected_data 구성 완료:")
+            print(f"   - financial_data: {bool(collected_data['financial_data'])}")
+            print(f"   - analysis_result: {bool(collected_data['analysis_result'])}")
+            print(f"   - news_data: {len(collected_data.get('news_data', []))}")
+            
             result = self.agents["response_agent"].process(
                 state["user_query"], 
                 state["query_analysis"], 
@@ -566,6 +593,8 @@ class WorkflowRouter:
                 
         except Exception as e:
             print(f"❌ 응답 에이전트 오류: {e}")
+            import traceback
+            traceback.print_exc()
             state["error"] = f"응답 에이전트 오류: {str(e)}"
         
         return state
@@ -624,6 +653,7 @@ class WorkflowRouter:
         # 일반 모드는 응답 생성으로
         return "response_agent"
     
+    @traceable(name="intelligent_workflow", run_type="chain", metadata={"workflow_type": "meta_agent_enhanced"})
     def process_query(self, user_query: str, user_id: str = None) -> Dict[str, Any]:
         """사용자 쿼리 처리"""
         try:

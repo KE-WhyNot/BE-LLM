@@ -80,6 +80,16 @@ class ResponseAgent(BaseAgent):
         try:
             self.log(f"최종 응답 생성 시작")
             
+            # 디버그: 수집된 데이터 확인
+            self.log(f"📊 수집된 데이터 키: {list(collected_data.keys())}")
+            if 'financial_data' in collected_data:
+                fd = collected_data['financial_data']
+                self.log(f"   financial_data 타입: {type(fd)}")
+                if isinstance(fd, dict):
+                    self.log(f"   financial_data 키: {list(fd.keys())}")
+                    self.log(f"   company_name: {fd.get('company_name', 'N/A')}")
+                    self.log(f"   current_price: {fd.get('current_price', 'N/A')}")
+            
             # 수집된 정보 포맷팅
             collected_info = self._format_collected_information(collected_data)
             
