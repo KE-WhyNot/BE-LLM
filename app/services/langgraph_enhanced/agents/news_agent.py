@@ -31,17 +31,21 @@ class NewsAgent(BaseAgent):
 다음 형식으로 응답해주세요:
 
 search_strategy: [검색 전략 - specific/general/market/sector/company 중 하나]
-search_query: [실제 검색에 사용할 쿼리]
+search_query: [실제 검색에 사용할 쿼리 - 영어로 작성 (예: Samsung Electronics, KOSPI, SK Hynix)]
 news_sources: [뉴스 소스 - google/mk/both]
 time_range: [시간 범위 - today/week/month]
 analysis_depth: [분석 깊이 - summary/detailed/comprehensive]
 focus_areas: [집중 영역 - price_impact/fundamental/technical/sentiment]
 
+## 중요: search_query는 반드시 영어로 작성하세요!
+- 한국 기업명은 영어로 변환 (예: 삼성전자 → Samsung Electronics, SK하이닉스 → SK Hynix, 현대자동차 → Hyundai Motor)
+- 시장/지수명도 영어로 (예: 코스피 → KOSPI, 반도체 → Semiconductor)
+
 ## 전략 예시
 
 요청: "삼성전자 뉴스 알려줘"
 search_strategy: company
-search_query: 삼성전자
+search_query: Samsung Electronics
 news_sources: both
 time_range: today
 analysis_depth: detailed
@@ -204,11 +208,26 @@ focus_areas: [값]"""
             # 실제 뉴스 수집
             news_data = []
             try:
+                import asyncio
+                
+                # 이벤트 루프 안전하게 처리
+                def run_async_safely(coro):
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            # 이미 실행 중인 루프가 있으면 nest_asyncio 사용
+                            import nest_asyncio
+                            nest_asyncio.apply()
+                        return loop.run_until_complete(coro)
+                    except RuntimeError:
+                        # 루프가 없으면 새로 생성
+                        return asyncio.run(coro)
+                
                 if strategy['news_sources'] in ['google', 'both']:
-                    google_news = news_service.get_comprehensive_news(
-                        query=strategy['search_query'],
-                        limit=10
-                    )
+                    # async 함수를 동기로 실행
+                    google_news = run_async_safely(news_service.get_comprehensive_news(
+                        query=strategy['search_query']
+                    ))
                     if google_news and 'news' in google_news:
                         news_data.extend(google_news['news'])
                 
@@ -225,6 +244,8 @@ focus_areas: [값]"""
                 
             except Exception as e:
                 self.log(f"뉴스 수집 오류: {e}")
+                import traceback
+                traceback.print_exc()
                 news_data = []
             
             # 뉴스 분석
