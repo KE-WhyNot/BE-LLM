@@ -17,12 +17,13 @@ from app.services.workflow_components.visualization_service import visualization
 from app.services.pinecone_rag_service import pinecone_rag_service
 from app.services.langgraph_enhanced.llm_manager import LLMManager
 
-# 간소화된 지능형 워크플로우 (선택적 사용)
+# 메타 에이전트 기반 지능형 워크플로우 (선택적 사용)
 try:
-    from app.services.langgraph_enhanced import simplified_intelligent_workflow
+    from app.services.langgraph_enhanced.workflow_router import WorkflowRouter
     INTELLIGENT_WORKFLOW_AVAILABLE = True
 except ImportError:
     INTELLIGENT_WORKFLOW_AVAILABLE = False
+    WorkflowRouter = None
 
 
 class FinancialWorkflowState(TypedDict):
@@ -47,6 +48,17 @@ class FinancialWorkflowService:
         self.llm = self._initialize_llm()
         self.llm_manager = LLMManager()  # AI 기반 동적 판단용
         self.workflow = self._create_workflow()
+        
+        # 메타 에이전트 워크플로우 라우터 초기화
+        if INTELLIGENT_WORKFLOW_AVAILABLE:
+            try:
+                self.intelligent_workflow_router = WorkflowRouter()
+                print("✅ 메타 에이전트 워크플로우 라우터 초기화 완료")
+            except Exception as e:
+                print(f"⚠️ 메타 에이전트 워크플로우 라우터 초기화 실패: {e}")
+                self.intelligent_workflow_router = None
+        else:
+            self.intelligent_workflow_router = None
     
     def _initialize_llm(self):
         """LLM 초기화"""
@@ -559,23 +571,37 @@ search_query: 오늘 하루 시장 뉴스"""
         return True
     
     def _process_with_intelligent_workflow(self, user_query: str, user_id: Optional[str]) -> Dict[str, Any]:
-        """LLM 기반 에이전트 시스템으로 처리"""
+        """메타 에이전트 기반 지능형 워크플로우로 처리"""
         try:
-            print(f"🤖 LLM 기반 에이전트 시스템 사용")
+            print(f"🤖 메타 에이전트 기반 지능형 워크플로우 사용")
+            print(f"   ✨ 복잡도 분석 → 서비스 계획 → 병렬 실행 → 결과 통합 → 신뢰도 평가")
             
-            # LLM 기반 에이전트 시스템 사용
-            from app.services.langgraph_enhanced.workflow_router import WorkflowRouter
+            # 이미 초기화된 워크플로우 라우터 사용
+            if self.intelligent_workflow_router is None:
+                raise Exception("메타 에이전트 워크플로우 라우터가 초기화되지 않았습니다")
             
-            router = WorkflowRouter()
-            result = router.process_query(
+            result = self.intelligent_workflow_router.process_query(
                 user_query=user_query,
                 user_id=user_id
             )
             
+            # 결과 로깅
+            if result.get('success'):
+                action_data = result.get('action_data', {})
+                if 'service_plan' in action_data:
+                    plan = action_data['service_plan']
+                    print(f"   📋 실행 계획: {plan.get('execution_mode', 'N/A')}")
+                if 'confidence_evaluation' in action_data:
+                    confidence = action_data['confidence_evaluation']
+                    print(f"   🎯 신뢰도: {confidence.get('overall_confidence', 0):.2f}")
+            
             return result
             
         except Exception as e:
-            print(f"❌ LLM 에이전트 시스템 실패, 기본 워크플로우로 폴백: {e}")
+            print(f"❌ 메타 에이전트 워크플로우 실패, 기본 워크플로우로 폴백: {e}")
+            import traceback
+            traceback.print_exc()
+            
             # 폴백: 기본 워크플로우 사용
             result = self._execute_workflow(user_query)
             return self._create_success_response(result, user_id)

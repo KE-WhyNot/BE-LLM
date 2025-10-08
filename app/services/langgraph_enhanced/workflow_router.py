@@ -1,6 +1,7 @@
 """
 LangGraph 워크플로우 라우터
 모든 분기 처리를 중앙에서 관리
+메타 에이전트 시스템으로 최적화된 병렬 실행
 """
 
 from typing import Dict, Any, TypedDict, List, Optional
@@ -15,16 +16,25 @@ from .agents import (
     AnalysisAgent,
     KnowledgeAgent,
     VisualizationAgent,
-    ResponseAgent
+    ResponseAgent,
+    # 메타 에이전트
+    ServicePlannerAgent,
+    ParallelExecutor,
+    ResultCombinerAgent,
+    ConfidenceCalculatorAgent
 )
 from .llm_manager import LLMManager
 
 
 class WorkflowState(TypedDict):
-    """워크플로우 상태 정의"""
+    """워크플로우 상태 정의 (메타 에이전트 필드 추가)"""
     messages: List[Any]
     user_query: str
     query_analysis: Dict[str, Any]
+    service_plan: Dict[str, Any]  # ✨ 서비스 전략 계획
+    parallel_results: Dict[str, Any]  # ✨ 병렬 실행 결과
+    combined_result: Dict[str, Any]  # ✨ 통합 결과
+    confidence_evaluation: Dict[str, Any]  # ✨ 신뢰도 평가
     financial_data: Dict[str, Any]
     analysis_result: str
     news_data: List[Dict[str, Any]]
@@ -42,7 +52,7 @@ class WorkflowRouter:
     def __init__(self):
         self.llm_manager = LLMManager()
         
-        # 에이전트 초기화
+        # 전문 에이전트 초기화
         self.agents = {
             "query_analyzer": QueryAnalyzerAgent(),
             "data_agent": DataAgent(),
@@ -53,32 +63,46 @@ class WorkflowRouter:
             "response_agent": ResponseAgent(),
         }
         
+        # 메타 에이전트 초기화 ✨ NEW
+        self.service_planner = ServicePlannerAgent()
+        self.parallel_executor = ParallelExecutor()
+        self.result_combiner = ResultCombinerAgent()
+        self.confidence_calculator = ConfidenceCalculatorAgent()
+        
         self.workflow = self._build_workflow()
     
     def _build_workflow(self) -> StateGraph:
-        """워크플로우 구축"""
+        """워크플로우 구축 (메타 에이전트 통합)"""
         workflow = StateGraph(WorkflowState)
         
-        # 에이전트 노드 추가
+        # 전문 에이전트 노드 추가
         workflow.add_node("query_analyzer", self._query_analyzer_node)
+        workflow.add_node("service_planner", self._service_planner_node)  # ✨ NEW
+        workflow.add_node("parallel_executor", self._parallel_executor_node)  # ✨ NEW
         workflow.add_node("data_agent", self._data_agent_node)
         workflow.add_node("analysis_agent", self._analysis_agent_node)
         workflow.add_node("news_agent", self._news_agent_node)
         workflow.add_node("knowledge_agent", self._knowledge_agent_node)
         workflow.add_node("visualization_agent", self._visualization_agent_node)
+        workflow.add_node("result_combiner", self._result_combiner_node)  # ✨ NEW
+        workflow.add_node("confidence_calculator", self._confidence_calculator_node)  # ✨ NEW
         workflow.add_node("response_agent", self._response_agent_node)
         workflow.add_node("error_handler", self._error_handler_node)
         
         # 시작점 설정
         workflow.set_entry_point("query_analyzer")
         
-        # 에이전트 간 연결
+        # 쿼리 분석 → 서비스 계획
+        workflow.add_edge("query_analyzer", "service_planner")
+        
+        # 서비스 계획 → 조건부 라우팅 (복잡도 기반)
         workflow.add_conditional_edges(
-            "query_analyzer",
-            self._route_after_query_analysis,
+            "service_planner",
+            self._route_after_planning,
             {
-                "data_agent": "data_agent",
-                "analysis_agent": "analysis_agent", 
+                "parallel": "parallel_executor",  # 병렬 실행 필요
+                "data_agent": "data_agent",       # 단순 데이터 조회
+                "analysis_agent": "analysis_agent",
                 "news_agent": "news_agent",
                 "knowledge_agent": "knowledge_agent",
                 "visualization_agent": "visualization_agent",
@@ -87,21 +111,31 @@ class WorkflowRouter:
             }
         )
         
+        # 병렬 실행 → 결과 통합
+        workflow.add_edge("parallel_executor", "result_combiner")
+        
         # 데이터 에이전트 후 라우팅
         workflow.add_conditional_edges(
             "data_agent",
             self._route_after_data,
             {
                 "response_agent": "response_agent",
+                "result_combiner": "result_combiner",
                 "end": END
             }
         )
         
-        # 다른 에이전트들은 모두 응답 에이전트로
-        workflow.add_edge("analysis_agent", "response_agent")
-        workflow.add_edge("news_agent", "response_agent")
-        workflow.add_edge("knowledge_agent", "response_agent")
-        workflow.add_edge("visualization_agent", "response_agent")
+        # 다른 전문 에이전트들 → 결과 통합
+        workflow.add_edge("analysis_agent", "result_combiner")
+        workflow.add_edge("news_agent", "result_combiner")
+        workflow.add_edge("knowledge_agent", "result_combiner")
+        workflow.add_edge("visualization_agent", "result_combiner")
+        
+        # 결과 통합 → 신뢰도 계산
+        workflow.add_edge("result_combiner", "confidence_calculator")
+        
+        # 신뢰도 계산 → 최종 응답
+        workflow.add_edge("confidence_calculator", "response_agent")
         
         # 응답 생성 후 종료
         workflow.add_edge("response_agent", END)
@@ -130,131 +164,302 @@ class WorkflowRouter:
         
         return state
     
-    def _data_agent_node(self, state: WorkflowState) -> WorkflowState:
-        """데이터 에이전트 노드"""
+    def _service_planner_node(self, state: WorkflowState) -> WorkflowState:
+        """서비스 계획 노드 - 복잡도 분석 및 실행 전략 수립"""
         try:
             user_query = state["user_query"]
             query_analysis = state["query_analysis"]
-            data_agent = self.agents["data_agent"]
             
-            result = data_agent.process(user_query, query_analysis)
+            # 서비스 플래너로 실행 전략 수립
+            planner_result = self.service_planner.process(user_query, query_analysis)
             
-            if result['success']:
-                state["financial_data"] = result['data']
+            if planner_result.get('success') and 'strategy' in planner_result:
+                strategy = planner_result['strategy']
                 
-                # 간단한 주가 요청이면 바로 응답 생성
-                if result.get('is_simple_request', False):
-                    state["final_response"] = result['simple_response']
-                    print(f"⚡ 간단한 주가 응답 생성 완료")
-                else:
-                    print(f"📊 데이터 조회 완료")
+                # workflow_router가 기대하는 형식으로 변환
+                service_plan = {
+                    'execution_mode': self._determine_execution_mode(strategy),
+                    'agents_to_execute': self._extract_agents_to_execute(strategy, query_analysis),
+                    'complexity': query_analysis.get('complexity', 'simple'),
+                    'next_agent': self._determine_next_agent(strategy, query_analysis),
+                    'strategy': strategy  # 원본 전략 보관
+                }
             else:
-                state["error"] = result.get('error', '데이터 조회 실패')
+                # 실패 시 query_analysis 기반으로 폴백
+                service_plan = {
+                    'execution_mode': 'single',
+                    'agents_to_execute': [],
+                    'complexity': 'simple',
+                    'next_agent': query_analysis.get('next_agent', 'response_agent'),
+                    'strategy': {}
+                }
+            
+            state["service_plan"] = service_plan
+            
+            print(f"🎯 서비스 계획 수립 완료:")
+            print(f"   복잡도: {service_plan.get('complexity', 'N/A')}")
+            print(f"   실행 모드: {service_plan.get('execution_mode', 'N/A')}")
+            print(f"   다음 에이전트: {service_plan.get('next_agent', 'N/A')}")
+            agents_list = service_plan.get('agents_to_execute', [])
+            if agents_list:
+                print(f"   병렬 실행 에이전트: {', '.join(agents_list)}")
             
         except Exception as e:
-            print(f"❌ 데이터 에이전트 오류: {e}")
-            state["error"] = f"데이터 에이전트 오류: {str(e)}"
+            print(f"❌ 서비스 플래너 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            state["error"] = f"서비스 계획 수립 중 오류: {str(e)}"
+            # 폴백: query_analysis 기반 단순 계획
+            query_analysis = state.get("query_analysis", {})
+            state["service_plan"] = {
+                "execution_mode": "single",
+                "next_agent": query_analysis.get("next_agent", "response_agent"),
+                "agents_to_execute": [],
+                "complexity": "simple"
+            }
         
         return state
+    
+    def _determine_execution_mode(self, strategy: Dict[str, Any]) -> str:
+        """전략에서 실행 모드 결정"""
+        execution_strategy = strategy.get('execution_strategy', 'sequential')
+        parallel_groups = strategy.get('parallel_groups', [])
+        
+        # parallel_groups가 있고 2개 이상의 에이전트를 동시 실행하면 parallel
+        if parallel_groups and len(parallel_groups) > 0:
+            # 첫 번째 그룹에 2개 이상의 에이전트가 있으면 병렬
+            if isinstance(parallel_groups[0], list) and len(parallel_groups[0]) > 1:
+                return 'parallel'
+        
+        return 'single'
+    
+    def _extract_agents_to_execute(self, strategy: Dict[str, Any], query_analysis: Dict[str, Any]) -> List[str]:
+        """실행할 에이전트 목록 추출"""
+        parallel_groups = strategy.get('parallel_groups', [])
+        
+        # 병렬 그룹에서 에이전트 추출
+        agents = []
+        if parallel_groups and len(parallel_groups) > 0:
+            # 첫 번째 병렬 그룹의 에이전트들
+            first_group = parallel_groups[0]
+            if isinstance(first_group, list):
+                # 'data', 'news' -> 'data_agent', 'news_agent'
+                agents = [f"{agent}_agent" if not agent.endswith('_agent') else agent 
+                         for agent in first_group]
+        
+        # 만약 추출된 에이전트가 없으면 query_analysis에서 추출
+        if not agents:
+            primary_intent = query_analysis.get('primary_intent', 'general')
+            if primary_intent in ['data', 'analysis', 'news', 'knowledge', 'visualization']:
+                agents = [f"{primary_intent}_agent"]
+        
+        return agents
+    
+    def _determine_next_agent(self, strategy: Dict[str, Any], query_analysis: Dict[str, Any]) -> str:
+        """다음 실행할 에이전트 결정 (단일 실행 모드용)"""
+        execution_order = strategy.get('execution_order', [])
+        
+        if execution_order and len(execution_order) > 0:
+            first_agent = execution_order[0]
+            # 'data' -> 'data_agent'
+            if not first_agent.endswith('_agent'):
+                first_agent = f"{first_agent}_agent"
+            return first_agent
+        
+        # 폴백: query_analysis에서 가져오기
+        return query_analysis.get('next_agent', 'response_agent')
+    
+    def _parallel_executor_node(self, state: WorkflowState) -> WorkflowState:
+        """병렬 실행 노드 - 여러 에이전트 동시 실행"""
+        try:
+            user_query = state["user_query"]
+            query_analysis = state["query_analysis"]
+            service_plan = state["service_plan"]
+            
+            # 병렬 실행할 에이전트 목록
+            agents_to_execute = service_plan.get("agents_to_execute", [])
+            
+            print(f"⚡ 병렬 실행 시작: {', '.join(agents_to_execute)}")
+            
+            # 병렬 실행 - execute_parallel_sync 메서드 사용 (동기식)
+            parallel_results = self.parallel_executor.execute_parallel_sync(
+                agents_to_execute,
+                self.agents,
+                user_query,
+                query_analysis
+            )
+            
+            state["parallel_results"] = parallel_results
+            
+            # 병렬 실행 결과를 state에 반영
+            for agent_name, result in parallel_results.items():
+                if result.get('success'):
+                    if agent_name == "data_agent":
+                        state["financial_data"] = result.get('data', {})
+                    elif agent_name == "analysis_agent":
+                        state["analysis_result"] = result.get('analysis_result', '')
+                    elif agent_name == "news_agent":
+                        state["news_data"] = result.get('news_data', [])
+                        state["news_analysis"] = result.get('analysis_result', '')
+                    elif agent_name == "knowledge_agent":
+                        state["knowledge_context"] = result.get('explanation_result', '')
+                    elif agent_name == "visualization_agent":
+                        state["chart_data"] = result.get('chart_data', {})
+            
+            print(f"✅ 병렬 실행 완료: {len(parallel_results)}개 에이전트")
+            
+        except Exception as e:
+            print(f"❌ 병렬 실행 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            state["error"] = f"병렬 실행 중 오류: {str(e)}"
+            state["parallel_results"] = {}
+        
+        return state
+    
+    def _result_combiner_node(self, state: WorkflowState) -> WorkflowState:
+        """결과 통합 노드 - LLM 기반 지능형 결과 통합"""
+        try:
+            user_query = state["user_query"]
+            
+            # 모든 수집된 데이터 정리
+            collected_data = {
+                'financial_data': state.get('financial_data', {}),
+                'analysis_result': state.get('analysis_result', ''),
+                'news_data': state.get('news_data', []),
+                'news_analysis': state.get('news_analysis', ''),
+                'knowledge_context': state.get('knowledge_context', ''),
+                'chart_data': state.get('chart_data', {}),
+                'chart_analysis': state.get('chart_analysis', '')
+            }
+            
+            print(f"🔗 결과 통합 시작...")
+            
+            # process 메서드 사용
+            combined_result = self.result_combiner.process(
+                user_query,
+                collected_data
+            )
+            
+            state["combined_result"] = combined_result
+            
+            print(f"✅ 결과 통합 완료")
+            
+        except Exception as e:
+            print(f"❌ 결과 통합 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            state["error"] = f"결과 통합 중 오류: {str(e)}"
+            state["combined_result"] = {"combined_response": "결과 통합 중 오류가 발생했습니다."}
+        
+        return state
+    
+    def _confidence_calculator_node(self, state: WorkflowState) -> WorkflowState:
+        """신뢰도 계산 노드 - 응답 품질 평가"""
+        try:
+            user_query = state["user_query"]
+            combined_result = state.get("combined_result", {})
+            
+            # process 메서드 사용
+            confidence_evaluation = self.confidence_calculator.process(
+                user_query,
+                combined_result,
+                state.get("parallel_results", {})
+            )
+            
+            state["confidence_evaluation"] = confidence_evaluation
+            
+            print(f"🎯 신뢰도 평가 완료:")
+            print(f"   전체 신뢰도: {confidence_evaluation.get('overall_confidence', 0):.2f}")
+            print(f"   데이터 품질: {confidence_evaluation.get('data_quality', 0):.2f}")
+            print(f"   응답 완성도: {confidence_evaluation.get('response_completeness', 0):.2f}")
+            
+        except Exception as e:
+            print(f"❌ 신뢰도 계산 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            state["error"] = f"신뢰도 계산 중 오류: {str(e)}"
+            state["confidence_evaluation"] = {"overall_confidence": 0.5}
+        
+        return state
+    
+    # ========== 공통 에이전트 실행 함수 (중복 제거) ==========
+    
+    def _execute_agent(self, agent_name: str, state: WorkflowState, 
+                      success_handler=None) -> WorkflowState:
+        """공통 에이전트 실행 로직"""
+        try:
+            agent = self.agents[agent_name]
+            result = agent.process(state["user_query"], state["query_analysis"])
+            
+            if result['success']:
+                if success_handler:
+                    success_handler(state, result)
+            else:
+                state["error"] = result.get('error', f'{agent_name} 실패')
+                
+        except Exception as e:
+            print(f"❌ {agent_name} 오류: {e}")
+            state["error"] = f"{agent_name} 오류: {str(e)}"
+        
+        return state
+    
+    def _data_agent_node(self, state: WorkflowState) -> WorkflowState:
+        """데이터 에이전트 노드"""
+        def handle_success(s, r):
+            s["financial_data"] = r['data']
+            if r.get('is_simple_request'):
+                s["final_response"] = r['simple_response']
+                print(f"⚡ 간단한 주가 응답 생성 완료")
+            else:
+                print(f"📊 데이터 조회 완료")
+        return self._execute_agent("data_agent", state, handle_success)
     
     def _analysis_agent_node(self, state: WorkflowState) -> WorkflowState:
         """분석 에이전트 노드"""
-        try:
-            user_query = state["user_query"]
-            query_analysis = state["query_analysis"]
-            analysis_agent = self.agents["analysis_agent"]
-            
-            result = analysis_agent.process(user_query, query_analysis)
-            
-            if result['success']:
-                state["analysis_result"] = result['analysis_result']
-                if result.get('financial_data'):
-                    state["financial_data"] = result['financial_data']
-                print(f"📈 투자 분석 완료: {result.get('stock_symbol', '일반')}")
-            else:
-                state["error"] = result.get('error', '투자 분석 실패')
-            
-        except Exception as e:
-            print(f"❌ 분석 에이전트 오류: {e}")
-            state["error"] = f"분석 에이전트 오류: {str(e)}"
-        
-        return state
+        def handle_success(s, r):
+            s["analysis_result"] = r['analysis_result']
+            if r.get('financial_data'):
+                s["financial_data"] = r['financial_data']
+            print(f"📈 투자 분석 완료: {r.get('stock_symbol', '일반')}")
+        return self._execute_agent("analysis_agent", state, handle_success)
     
     def _news_agent_node(self, state: WorkflowState) -> WorkflowState:
         """뉴스 에이전트 노드"""
-        try:
-            user_query = state["user_query"]
-            query_analysis = state["query_analysis"]
-            news_agent = self.agents["news_agent"]
-            
-            result = news_agent.process(user_query, query_analysis)
-            
-            if result['success']:
-                state["news_data"] = result['news_data']
-                state["news_analysis"] = result['analysis_result']
-                print(f"📰 뉴스 수집 및 분석 완료: {len(result['news_data'])}건")
-            else:
-                state["error"] = result.get('error', '뉴스 수집 실패')
-            
-        except Exception as e:
-            print(f"❌ 뉴스 에이전트 오류: {e}")
-            state["error"] = f"뉴스 에이전트 오류: {str(e)}"
-        
-        return state
+        def handle_success(s, r):
+            s["news_data"] = r['news_data']
+            s["news_analysis"] = r['analysis_result']
+            print(f"📰 뉴스 수집 및 분석 완료: {len(r['news_data'])}건")
+        return self._execute_agent("news_agent", state, handle_success)
     
     def _knowledge_agent_node(self, state: WorkflowState) -> WorkflowState:
         """지식 에이전트 노드"""
-        try:
-            user_query = state["user_query"]
-            query_analysis = state["query_analysis"]
-            knowledge_agent = self.agents["knowledge_agent"]
-            
-            result = knowledge_agent.process(user_query, query_analysis)
-            
-            if result['success']:
-                state["knowledge_context"] = result['explanation_result']
-                print(f"📚 지식 교육 완료: {result.get('concept', '일반')}")
-            else:
-                state["error"] = result.get('error', '지식 설명 실패')
-            
-        except Exception as e:
-            print(f"❌ 지식 에이전트 오류: {e}")
-            state["error"] = f"지식 에이전트 오류: {str(e)}"
-        
-        return state
+        def handle_success(s, r):
+            s["knowledge_context"] = r['explanation_result']
+            print(f"📚 지식 교육 완료: {r.get('concept', '일반')}")
+        return self._execute_agent("knowledge_agent", state, handle_success)
     
     def _visualization_agent_node(self, state: WorkflowState) -> WorkflowState:
         """시각화 에이전트 노드"""
-        try:
-            user_query = state["user_query"]
-            query_analysis = state["query_analysis"]
-            visualization_agent = self.agents["visualization_agent"]
-            
-            result = visualization_agent.process(user_query, query_analysis)
-            
-            if result['success']:
-                state["chart_data"] = result['chart_data']
-                state["chart_analysis"] = result['analysis_result']
-                if result.get('chart_image'):
-                    state["chart_image"] = result['chart_image']
-                print(f"📊 차트 생성 및 분석 완료")
-            else:
-                state["error"] = result.get('error', '차트 생성 실패')
-            
-        except Exception as e:
-            print(f"❌ 시각화 에이전트 오류: {e}")
-            state["error"] = f"시각화 에이전트 오류: {str(e)}"
-        
-        return state
+        def handle_success(s, r):
+            s["chart_data"] = r['chart_data']
+            s["chart_analysis"] = r['analysis_result']
+            if r.get('chart_image'):
+                s["chart_image"] = r['chart_image']
+            print(f"📊 차트 생성 및 분석 완료")
+        return self._execute_agent("visualization_agent", state, handle_success)
     
     def _response_agent_node(self, state: WorkflowState) -> WorkflowState:
         """응답 에이전트 노드"""
         try:
-            user_query = state["user_query"]
-            query_analysis = state["query_analysis"]
-            response_agent = self.agents["response_agent"]
+            # 메타 에이전트의 통합 결과가 있으면 우선 사용
+            combined_result = state.get("combined_result", {})
+            if combined_result.get("combined_response"):
+                state["final_response"] = combined_result["combined_response"]
+                print(f"💬 메타 에이전트 통합 응답 사용")
+                return state
             
-            # 수집된 데이터 통합
+            # 통합 결과가 없으면 기존 방식으로 응답 생성
             collected_data = {
                 'financial_data': state.get('financial_data', {}),
                 'analysis_result': state.get('analysis_result', ''),
@@ -265,14 +470,18 @@ class WorkflowRouter:
                 'chart_analysis': state.get('chart_analysis', '')
             }
             
-            result = response_agent.process(user_query, query_analysis, collected_data)
+            result = self.agents["response_agent"].process(
+                state["user_query"], 
+                state["query_analysis"], 
+                collected_data
+            )
             
             if result['success']:
                 state["final_response"] = result['final_response']
-                print(f"💬 최종 응답 생성 완료")
+                print(f"💬 기본 응답 생성 완료")
             else:
                 state["error"] = result.get('error', '응답 생성 실패')
-            
+                
         except Exception as e:
             print(f"❌ 응답 에이전트 오류: {e}")
             state["error"] = f"응답 에이전트 오류: {str(e)}"
@@ -285,39 +494,53 @@ class WorkflowRouter:
         state["final_response"] = f"죄송합니다. {error_msg} 다른 질문으로 시도해보세요."
         return state
     
+    # ========== 라우팅 함수들 ==========
+    
+    def _route_after_planning(self, state: WorkflowState) -> str:
+        """서비스 계획 후 라우팅"""
+        service_plan = state.get("service_plan", {})
+        execution_mode = service_plan.get("execution_mode", "single")
+        
+        # 에러가 있으면 에러 핸들러로
+        if state.get("error"):
+            return "error"
+        
+        # 병렬 실행 모드 - 여러 에이전트 동시 실행
+        if execution_mode == "parallel":
+            agents_to_execute = service_plan.get("agents_to_execute", [])
+            if len(agents_to_execute) > 1:
+                return "parallel"
+        
+        # 단일 에이전트 실행 모드
+        next_agent = service_plan.get("next_agent", "response_agent")
+        
+        # 병렬 실행 에이전트 목록이 있으면 첫 번째 실행
+        agents_to_execute = service_plan.get("agents_to_execute", [])
+        if agents_to_execute and len(agents_to_execute) > 0:
+            # 병렬 실행할 에이전트가 1개만 있어도 그것을 실행
+            next_agent = agents_to_execute[0]
+        
+        return next_agent
+    
     def _route_after_query_analysis(self, state: WorkflowState) -> str:
         """쿼리 분석 후 라우팅"""
         return state.get("next_agent", "response_agent")
     
     def _route_after_data(self, state: WorkflowState) -> str:
         """데이터 에이전트 후 라우팅"""
+        service_plan = state.get("service_plan", {})
+        execution_mode = service_plan.get("execution_mode", "single")
+        
         # 간단한 주가 요청이고 이미 응답이 생성된 경우 바로 종료
         if state.get("final_response"):
             return "end"
-        else:
-            return "response_agent"
-    
-    def _build_response_context(self, state: WorkflowState) -> str:
-        """응답 컨텍스트 구축"""
-        context_parts = []
         
-        if state.get("financial_data"):
-            context_parts.append(f"📊 금융 데이터: {state['financial_data']}")
+        # 병렬 실행 모드였다면 결과 통합으로
+        if execution_mode == "parallel":
+            return "result_combiner"
         
-        if state.get("analysis_result"):
-            context_parts.append(f"📈 분석 결과: {state['analysis_result']}")
-        
-        if state.get("news_data"):
-            news_summary = "\n".join([f"- {news['title']}" for news in state['news_data'][:3]])
-            context_parts.append(f"📰 뉴스 정보:\n{news_summary}")
-        
-        if state.get("knowledge_context"):
-            context_parts.append(f"📚 지식 정보: {state['knowledge_context']}")
-        
-        if state.get("chart_data"):
-            context_parts.append("📊 차트가 생성되었습니다.")
-        
-        return "\n\n".join(context_parts) if context_parts else "수집된 정보가 없습니다."
+        # 일반 모드는 응답 생성으로
+        return "response_agent"
     
     def process_query(self, user_query: str, user_id: str = None) -> Dict[str, Any]:
         """사용자 쿼리 처리"""
@@ -327,6 +550,10 @@ class WorkflowRouter:
                 messages=[HumanMessage(content=user_query)],
                 user_query=user_query,
                 query_analysis={},
+                service_plan={},  # ✨ 메타 에이전트 필드
+                parallel_results={},  # ✨ 메타 에이전트 필드
+                combined_result={},  # ✨ 메타 에이전트 필드
+                confidence_evaluation={},  # ✨ 메타 에이전트 필드
                 financial_data={},
                 analysis_result="",
                 news_data=[],
@@ -343,20 +570,23 @@ class WorkflowRouter:
             
             # 응답 형식 변환
             return {
-                "success": "error" not in result,
+                "success": "error" not in result or not result.get("error"),
                 "reply_text": result.get("final_response", ""),
-                "action_type": "llm_agent_analysis",
+                "action_type": "intelligent_agent_system",
                 "action_data": {
                     "query_analysis": result.get("query_analysis", {}),
+                    "service_plan": result.get("service_plan", {}),
+                    "confidence_evaluation": result.get("confidence_evaluation", {}),
                     "agent_history": result.get("agent_history", []),
                     "timestamp": datetime.now().isoformat(),
                     "user_id": user_id,
-                    "workflow_type": "clean_agent_system"
+                    "workflow_type": "meta_agent_enhanced"
                 },
                 "chart_image": result.get("chart_data", {}).get("chart_base64") if result.get("chart_data") else None
             }
             
         except Exception as e:
+            print(f"❌ 워크플로우 실행 오류: {e}")
             return {
                 "success": False,
                 "reply_text": f"시스템 오류가 발생했습니다: {str(e)}",
