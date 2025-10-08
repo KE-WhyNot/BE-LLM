@@ -6,6 +6,7 @@ from langchain.schema import BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from datetime import datetime
+import asyncio
 
 from app.config import settings
 from app.services.workflow_components.query_classifier_service import query_classifier
@@ -15,6 +16,7 @@ from app.services.workflow_components.news_service import news_service
 from app.services.workflow_components.response_generator_service import response_generator
 from app.services.workflow_components.visualization_service import visualization_service
 from app.services.rag_service import rag_service
+from app.services.langgraph_enhanced.llm_manager import LLMManager
 
 # 간소화된 지능형 워크플로우 (선택적 사용)
 try:
@@ -44,6 +46,7 @@ class FinancialWorkflowService:
     
     def __init__(self):
         self.llm = self._initialize_llm()
+        self.llm_manager = LLMManager()  # AI 기반 동적 판단용
         self.workflow = self._create_workflow()
     
     def _initialize_llm(self):
@@ -182,7 +185,18 @@ class FinancialWorkflowService:
                 return state
             
             data = state["financial_data"]
-            analysis_result = analysis_service.analyze_financial_data(data)
+            # 매일경제 KG 컨텍스트를 포함한 심층 투자 의견 생성 (LLM)
+            user_query = state.get("user_query", "")
+            try:
+                analysis_result = asyncio.run(
+                    analysis_service.get_investment_recommendation_with_context(data, user_query)
+                )
+            except RuntimeError:
+                # 이미 이벤트 루프가 돌아가는 환경(예: FastAPI) 대응
+                loop = asyncio.get_event_loop()
+                analysis_result = loop.run_until_complete(
+                    analysis_service.get_investment_recommendation_with_context(data, user_query)
+                )
             
             state["analysis_result"] = analysis_result
             state["next_step"] = "generate_response"
@@ -194,12 +208,24 @@ class FinancialWorkflowService:
         
         return state
     
-    def _get_news(self, state: FinancialWorkflowState) -> FinancialWorkflowState:
-        """뉴스 조회 - news_service 호출"""
+    async def _get_news(self, state: FinancialWorkflowState) -> FinancialWorkflowState:
+        """뉴스 조회 - 동적 판단으로 일반 뉴스 vs 특정 주제 뉴스"""
         try:
             query = state["user_query"]
-            news = news_service.get_financial_news(query)
+            
+            # 🤖 AI 기반 동적 판단: 주제가 명확하지 않으면 오늘 하루 전체 뉴스 분석
+            news_query = await self._determine_news_query(query)
+            
+            # Google RSS 실시간 뉴스 + 번역 사용
+            news = await news_service.get_comprehensive_news(news_query, use_google_rss=True, translate=True)
+            
+            # 뉴스가 없으면 오늘 하루 전체 뉴스로 폴백
+            if not news and news_query != "오늘 하루 시장 뉴스":
+                print("🔄 특정 주제 뉴스 없음, 오늘 하루 전체 뉴스로 폴백...")
+                news = await news_service.get_comprehensive_news("오늘 하루 시장 뉴스", use_google_rss=True, translate=True)
+            
             state["news_data"] = news
+            state["news_query_used"] = news_query  # 실제 사용된 쿼리 저장
             state["next_step"] = "generate_response"
             
         except Exception as e:
@@ -208,6 +234,94 @@ class FinancialWorkflowService:
             state["next_step"] = "error"
         
         return state
+    
+    async def _determine_news_query(self, user_query: str) -> str:
+        """🤖 AI 기반 동적 뉴스 쿼리 결정 (하드코딩 대신 LLM 활용)"""
+        try:
+            # LLM을 사용한 동적 판단
+            if hasattr(self, 'llm_manager'):
+                llm = self.llm_manager.get_llm(purpose="classification")
+                
+                prompt = f"""당신은 뉴스 검색 쿼리 분류 전문가입니다. 사용자의 질문을 분석하여 적절한 뉴스 검색 전략을 결정해주세요.
+
+사용자 질문: "{user_query}"
+
+분류 기준:
+1. SPECIFIC: 특정 기업명(삼성전자, 네이버 등) 또는 특정 섹터(반도체, AI 등)가 언급된 경우
+2. GENERAL: 구체적 주제 없이 일반적인 뉴스 분석 요청인 경우
+
+다음 형식으로만 응답하세요:
+classification: SPECIFIC 또는 GENERAL
+confidence: 0.0-1.0
+reasoning: 분류 근거
+search_query: 실제 검색 쿼리
+
+예시:
+질문: "삼성전자 뉴스"
+classification: SPECIFIC
+confidence: 0.95
+reasoning: 특정 기업명이 명시됨
+search_query: 삼성전자 뉴스
+
+질문: "뉴스 분석해줘"
+classification: GENERAL
+confidence: 0.9
+reasoning: 구체적 주제 없이 일반 뉴스 분석 요청
+search_query: 오늘 하루 시장 뉴스"""
+
+                response = llm.invoke(prompt)
+                response_text = response.content.strip()
+                
+                # 응답 파싱 (간단한 키-값 형식)
+                try:
+                    lines = response_text.strip().split('\n')
+                    result = {}
+                    
+                    for line in lines:
+                        if ':' in line:
+                            key, value = line.split(':', 1)
+                            key = key.strip()
+                            value = value.strip()
+                            
+                            if key == 'classification':
+                                result['classification'] = value
+                            elif key == 'confidence':
+                                result['confidence'] = float(value)
+                            elif key == 'reasoning':
+                                result['reasoning'] = value
+                            elif key == 'search_query':
+                                result['search_query'] = value
+                    
+                    if 'classification' in result and 'confidence' in result and 'search_query' in result:
+                        print(f"🤖 AI 뉴스 쿼리 분류: {result['classification']} (신뢰도: {result['confidence']:.2f})")
+                        print(f"   근거: {result.get('reasoning', 'N/A')}")
+                        
+                        # 신뢰도가 높으면 AI 결과 사용, 낮으면 폴백
+                        if result['confidence'] >= 0.7:
+                            return result['search_query']
+                        else:
+                            print("   ⚠️ 신뢰도 낮음, 폴백 로직 사용")
+                            return self._fallback_news_query(user_query)
+                    else:
+                        print("   ❌ 응답 형식 오류, 폴백 로직 사용")
+                        return self._fallback_news_query(user_query)
+                        
+                except Exception as e:
+                    print(f"   ❌ 응답 파싱 오류: {e}")
+                    print(f"   원본 응답: {response_text}")
+                    return self._fallback_news_query(user_query)
+            else:
+                # LLM이 없으면 폴백 로직 사용
+                return self._fallback_news_query(user_query)
+                
+        except Exception as e:
+            print(f"❌ AI 뉴스 쿼리 분류 중 오류: {e}")
+            return self._fallback_news_query(user_query)
+    
+    def _fallback_news_query(self, user_query: str) -> str:
+        """폴백: 기본 뉴스 쿼리 (AI 실패 시 사용)"""
+        # AI가 실패하면 기본적으로 오늘 하루 시장 뉴스로 폴백
+        return "오늘 하루 시장 뉴스"
     
     def _search_knowledge(self, state: FinancialWorkflowState) -> FinancialWorkflowState:
         """지식 검색 - rag_service 호출"""
@@ -322,86 +436,29 @@ class FinancialWorkflowService:
             return self._create_error_response(e, user_id)
     
     def _should_use_intelligent_workflow(self, user_message: str) -> bool:
-        """지능형 워크플로우 사용 여부 자동 결정"""
-        # 복잡한 질문 키워드들
-        complex_keywords = [
-            "종합", "비교", "분석", "예측", "추천", "의견", "고려",
-            "여러", "다양한", "상세", "심화", "고급", "전문적"
-        ]
-        
-        # 멀티 서비스가 필요한 키워드들
-        multi_service_keywords = [
-            "뉴스", "차트", "분석", "지식", "설명", "현재가", "예측"
-        ]
-        
-        # 질문 복잡도 점수 계산
-        complexity_score = 0
-        service_count = 0
-        
-        message_lower = user_message.lower()
-        
-        # 복잡도 키워드 체크
-        for keyword in complex_keywords:
-            if keyword in message_lower:
-                complexity_score += 2
-        
-        # 멀티 서비스 키워드 체크
-        for keyword in multi_service_keywords:
-            if keyword in message_lower:
-                service_count += 1
-        
-        # 문장 길이 고려
-        if len(user_message) > 30:
-            complexity_score += 1
-        
-        # 여러 문장이나 질문이 있는 경우
-        if user_message.count("?") > 1 or user_message.count("그리고") > 0:
-            complexity_score += 2
-        
-        # 지능형 워크플로우 사용 조건
-        use_intelligent = (
-            complexity_score >= 3 or  # 복잡도 점수가 3 이상
-            service_count >= 3 or    # 3개 이상의 서비스가 필요
-            len(user_message) > 50   # 긴 질문
-        )
-        
-        if use_intelligent:
-            print(f"🧠 지능형 워크플로우 자동 선택: 복잡도={complexity_score}, 서비스={service_count}")
-        else:
-            print(f"⚡ 기본 워크플로우 자동 선택: 복잡도={complexity_score}, 서비스={service_count}")
-        
-        return use_intelligent
+        """LLM 기반 에이전트 시스템 사용 여부 결정"""
+        # 모든 요청을 LLM 기반 에이전트 시스템으로 처리
+        print(f"🤖 LLM 기반 에이전트 시스템 사용")
+        return True
     
     def _process_with_intelligent_workflow(self, user_query: str, user_id: Optional[str]) -> Dict[str, Any]:
-        """지능형 멀티 서비스 워크플로우로 처리"""
+        """LLM 기반 에이전트 시스템으로 처리"""
         try:
-            print(f"🧠 지능형 멀티 서비스 워크플로우 사용")
+            print(f"🤖 LLM 기반 에이전트 시스템 사용")
             
-            result = simplified_intelligent_workflow.process_query(
-                query=user_query,
-                user_id=int(user_id) if user_id else 1,
-                session_id=f"intelligent_{user_id or 'default'}"
+            # LLM 기반 에이전트 시스템 사용
+            from app.services.langgraph_enhanced.workflow_router import WorkflowRouter
+            
+            router = WorkflowRouter()
+            result = router.process_query(
+                user_query=user_query,
+                user_id=user_id
             )
             
-            # 응답 형식을 기존 형식에 맞게 변환
-            return {
-                "success": "error" not in result,
-                "reply_text": result.get("response", ""),
-                "action_type": "intelligent_analysis",
-                "action_data": {
-                    "query_complexity": result.get("query_complexity", ""),
-                    "confidence_score": result.get("confidence_score", 0.0),
-                    "services_used": result.get("services_used", []),
-                    "fallback_used": result.get("fallback_used", []),
-                    "timestamp": datetime.now().isoformat(),
-                    "user_id": user_id,
-                    "workflow_type": "intelligent_multi_service"
-                },
-                "chart_image": result.get("chart_data", {}).get("chart_base64") if result.get("chart_data") else None
-            }
+            return result
             
         except Exception as e:
-            print(f"❌ 지능형 워크플로우 실패, 기본 워크플로우로 폴백: {e}")
+            print(f"❌ LLM 에이전트 시스템 실패, 기본 워크플로우로 폴백: {e}")
             # 폴백: 기본 워크플로우 사용
             result = self._execute_workflow(user_query)
             return self._create_success_response(result, user_id)

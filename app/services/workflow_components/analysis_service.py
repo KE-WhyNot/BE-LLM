@@ -1,25 +1,35 @@
-"""데이터 분석 서비스 (동적 프롬프팅 지원)"""
+"""데이터 분석 서비스 (동적 프롬프팅 지원 + 매일경제 KG 컨텍스트)"""
 
+import asyncio
 from typing import Dict, Any, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
-from app.services.langgraph_enhanced import prompt_manager
+# prompt_manager는 agents/에서 개별 관리
 
 
 class AnalysisService:
-    """금융 데이터 분석을 담당하는 서비스 (동적 프롬프팅)"""
+    """금융 데이터 분석을 담당하는 서비스 (동적 프롬프팅 + KG 컨텍스트)"""
     
     def __init__(self):
         self.llm = self._initialize_llm()
+        # 순환 import 방지를 위해 lazy import
+        self._news_service = None
+    
+    @property
+    def news_service(self):
+        """지연 로딩으로 news_service 가져오기"""
+        if self._news_service is None:
+            from app.services.workflow_components.news_service import news_service
+            self._news_service = news_service
+        return self._news_service
     
     def _initialize_llm(self):
-        """LLM 초기화"""
+        """LLM 초기화 (최적화된 파라미터)"""
+        # 최적화된 LLM 매니저 사용
+        from app.services.langgraph_enhanced.llm_manager import get_gemini_llm
+        
         if settings.google_api_key:
-            return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash-exp",
-                temperature=0.7,
-                google_api_key=settings.google_api_key
-            )
+            return get_gemini_llm(purpose="analysis")
         return None
     
     def analyze_financial_data(self, data: Dict[str, Any]) -> str:
@@ -80,8 +90,46 @@ class AnalysisService:
         except Exception as e:
             return f"분석 중 오류: {str(e)}"
     
+    async def get_investment_recommendation_with_context(self, data: Dict[str, Any], query: str) -> str:
+        """투자 추천 의견 생성 (매일경제 KG 컨텍스트 포함)
+        
+        Args:
+            data: 금융 데이터 딕셔너리
+            query: 분석 대상 (예: "삼성전자")
+            
+        Returns:
+            str: 투자 추천 의견 (KG 컨텍스트 기반)
+        """
+        try:
+            # 1. 기본 분석
+            basic_analysis = self.get_investment_recommendation(data)
+            
+            # 2. 매일경제 KG에서 컨텍스트 가져오기
+            kg_context = await self.news_service.get_analysis_context_from_kg(query, limit=3)
+            
+            # 3. 컨텍스트가 있으면 LLM으로 종합 분석
+            if kg_context and self.llm:
+                prompt = f"""다음 정보를 바탕으로 투자 의견을 제시해주세요:
+
+기본 분석:
+{basic_analysis}
+
+{kg_context}
+
+종합적인 투자 의견을 3-4문장으로 작성해주세요."""
+                
+                response = self.llm.invoke(prompt)
+                return response.content
+            
+            # 4. 컨텍스트가 없으면 기본 분석만 반환
+            return basic_analysis
+            
+        except Exception as e:
+            print(f"❌ 투자 추천 생성 중 오류: {e}")
+            return self.get_investment_recommendation(data)
+    
     def get_investment_recommendation(self, data: Dict[str, Any]) -> str:
-        """투자 추천 의견 생성
+        """투자 추천 의견 생성 (기본 버전)
         
         Args:
             data: 금융 데이터 딕셔너리

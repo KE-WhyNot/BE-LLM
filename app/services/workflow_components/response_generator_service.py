@@ -5,7 +5,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
 from app.utils.formatters import stock_data_formatter, news_formatter, analysis_formatter
 from app.services.workflow_components.visualization_service import visualization_service
-from app.services.langgraph_enhanced import prompt_manager
+# prompt_manager는 agents/에서 개별 관리
 
 
 class ResponseGeneratorService:
@@ -15,13 +15,12 @@ class ResponseGeneratorService:
         self.llm = self._initialize_llm()
     
     def _initialize_llm(self):
-        """LLM 초기화"""
+        """LLM 초기화 (최적화된 파라미터)"""
+        # 최적화된 LLM 매니저 사용
+        from app.services.langgraph_enhanced.llm_manager import get_gemini_llm
+        
         if settings.google_api_key:
-            return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash-exp",
-                temperature=0.7,
-                google_api_key=settings.google_api_key
-            )
+            return get_gemini_llm(purpose="response")
         return None
     
     def generate_data_response(self, financial_data: Dict[str, Any]) -> str:
@@ -515,7 +514,162 @@ class ResponseGeneratorService:
 • 실전 투자 전략에 대해 알아보시겠어요?
 • 특정 시장이나 섹터에 대해 더 알고 싶으신가요?"""
     
-    def generate_response(self, state: Dict[str, Any]) -> str:
+    async def generate_news_analysis_response(self, news_data: List[Dict[str, Any]], user_query: str, news_query_used: str = None) -> str:
+        """뉴스 분석 응답 생성 (특히 오늘 하루 뉴스 분석용)
+        
+        Args:
+            news_data: 뉴스 데이터 리스트
+            user_query: 사용자 원본 쿼리
+            news_query_used: 실제 사용된 뉴스 검색 쿼리
+            
+        Returns:
+            str: 분석된 뉴스 응답
+        """
+        try:
+            if not news_data:
+                return "📰 죄송합니다. 관련 뉴스를 찾을 수 없습니다.\n\n**다시 시도해보세요:**\n- 더 일반적인 키워드 사용: \"삼성전자\", \"반도체\", \"한국 증시\" 등\n- 다른 종목이나 주제로 검색해보세요\n- 잠시 후 다시 시도해주세요"
+            
+            # 오늘 하루 뉴스 분석인지 확인
+            is_today_analysis = news_query_used == "오늘 하루 시장 뉴스" or "오늘" in user_query or "하루" in user_query
+            
+            if is_today_analysis:
+                return await self._generate_today_market_analysis(news_data)
+            else:
+                return await self._generate_specific_news_analysis(news_data, user_query)
+                
+        except Exception as e:
+            print(f"❌ 뉴스 분석 응답 생성 중 오류: {e}")
+            return f"📰 뉴스 분석 중 오류가 발생했습니다: {str(e)}"
+    
+    async def _generate_today_market_analysis(self, news_data: List[Dict[str, Any]]) -> str:
+        """오늘 하루 시장 뉴스 종합 분석 생성"""
+        try:
+            # LLM을 사용한 종합 분석
+            if self.llm:
+                news_summary = "\n".join([
+                    f"{i+1}. {news['title']}\n   {news.get('summary', news.get('description', ''))[:100]}..."
+                    for i, news in enumerate(news_data[:8])  # 상위 8개만 사용
+                ])
+                
+                prompt = f"""당신은 전문 금융 애널리스트입니다. 오늘 하루의 주요 시장 뉴스들을 분석하여 종합적인 시장 동향을 제공해주세요.
+
+## 📰 오늘의 주요 뉴스들
+{news_summary}
+
+## 📊 분석 요청사항
+다음 관점에서 종합 분석을 제공해주세요:
+
+1. **🎯 주요 이슈**: 오늘 가장 주목할 만한 이슈 3가지
+2. **📈 시장 영향**: 각 이슈가 주식시장에 미칠 영향
+3. **🏢 섹터별 동향**: 주요 섹터(반도체, 자동차, 바이오 등)별 동향
+4. **💡 투자 인사이트**: 투자자 관점에서의 해석 및 조언
+5. **⚠️ 주의사항**: 투자 시 주의해야 할 리스크 요소
+
+## 📝 응답 형식
+**📅 오늘의 시장 분석 (2025년 1월 7일)**
+
+### 🎯 주요 이슈
+• 이슈 1: [내용]
+• 이슈 2: [내용]  
+• 이슈 3: [내용]
+
+### 📈 시장 영향
+• 긍정적 요인: [내용]
+• 부정적 요인: [내용]
+
+### 🏢 섹터별 동향
+• 반도체: [내용]
+• 자동차: [내용]
+• 바이오: [내용]
+
+### 💡 투자 인사이트
+[종합적인 투자 관점에서의 해석]
+
+### ⚠️ 주의사항
+[투자 시 주의할 점들]
+
+**면책조항**: 이 분석은 참고용이며, 투자 권유가 아닙니다. 투자 결정은 신중히 하시기 바랍니다."""
+
+                response = self.llm.invoke(prompt)
+                return response.content
+            else:
+                # LLM이 없는 경우 기본 분석
+                return self._generate_basic_news_summary(news_data, is_today_analysis=True)
+                
+        except Exception as e:
+            print(f"❌ 오늘 시장 분석 생성 중 오류: {e}")
+            return self._generate_basic_news_summary(news_data, is_today_analysis=True)
+    
+    async def _generate_specific_news_analysis(self, news_data: List[Dict[str, Any]], user_query: str) -> str:
+        """특정 주제 뉴스 분석 생성"""
+        try:
+            if self.llm:
+                news_summary = "\n".join([
+                    f"{i+1}. {news['title']}\n   {news.get('summary', news.get('description', ''))[:150]}..."
+                    for i, news in enumerate(news_data[:5])
+                ])
+                
+                prompt = f"""당신은 전문 금융 애널리스트입니다. "{user_query}"에 대한 최신 뉴스들을 분석하여 상세한 분석을 제공해주세요.
+
+## 📰 관련 뉴스들
+{news_summary}
+
+## 📊 분석 요청사항
+다음 관점에서 분석을 제공해주세요:
+
+1. **📈 핵심 내용**: 주요 뉴스 내용 요약
+2. **💼 기업/섹터 영향**: 관련 기업이나 섹터에 미치는 영향
+3. **📊 투자 관점**: 투자자 관점에서의 해석
+4. **🔮 전망**: 향후 전망 및 시사점
+
+## 📝 응답 형식
+**📰 {user_query} 관련 뉴스 분석**
+
+### 📈 핵심 내용
+[주요 뉴스 내용 요약]
+
+### 💼 기업/섹터 영향  
+[관련 기업이나 섹터에 미치는 영향]
+
+### 📊 투자 관점
+[투자자 관점에서의 해석]
+
+### 🔮 전망
+[향후 전망 및 시사점]
+
+**면책조항**: 이 분석은 참고용이며, 투자 권유가 아닙니다."""
+
+                response = self.llm.invoke(prompt)
+                return response.content
+            else:
+                return self._generate_basic_news_summary(news_data, is_today_analysis=False)
+                
+        except Exception as e:
+            print(f"❌ 특정 뉴스 분석 생성 중 오류: {e}")
+            return self._generate_basic_news_summary(news_data, is_today_analysis=False)
+    
+    def _generate_basic_news_summary(self, news_data: List[Dict[str, Any]], is_today_analysis: bool = False) -> str:
+        """기본 뉴스 요약 생성 (LLM 없을 때)"""
+        if is_today_analysis:
+            title = "📅 오늘의 주요 시장 뉴스"
+        else:
+            title = "📰 관련 뉴스"
+        
+        response = f"{title}\n\n"
+        
+        for i, news in enumerate(news_data[:5], 1):
+            response += f"**{i}. {news['title']}**\n"
+            if news.get('summary'):
+                response += f"{news['summary'][:200]}...\n"
+            elif news.get('description'):
+                response += f"{news['description'][:200]}...\n"
+            if news.get('url'):
+                response += f"🔗 [원문 보기]({news['url']})\n"
+            response += "\n"
+        
+        return response
+
+    async def generate_response(self, state: Dict[str, Any]) -> str:
         """통합 응답 생성 (동적 워크플로우용)
         
         Args:
@@ -534,7 +688,7 @@ class ResponseGeneratorService:
             elif query_type in ["analysis", "detailed_analysis", "guided_analysis"]:
                 response = self._generate_analysis_response(state)
             elif query_type in ["news", "contextual_news"]:
-                response = self._generate_news_response(state)
+                response = await self._generate_news_response(state)
             elif query_type in ["knowledge", "contextual_knowledge"]:
                 response = self._generate_knowledge_response(state)
             elif query_type in ["data", "data_optimized"]:
@@ -585,14 +739,16 @@ class ResponseGeneratorService:
         
         return response
     
-    def _generate_news_response(self, state: Dict[str, Any]) -> str:
-        """뉴스 응답 생성"""
+    async def _generate_news_response(self, state: Dict[str, Any]) -> str:
+        """뉴스 응답 생성 (새로운 분석 방식 사용)"""
         news_data = state.get("news_data", [])
+        user_query = state.get("user_query", "")
+        news_query_used = state.get("news_query_used", user_query)
         
         if not news_data:
-            return "❌ 관련 뉴스를 찾을 수 없습니다."
+            return "📰 죄송합니다. 관련 뉴스를 찾을 수 없습니다."
         
-        return self.generate_news_response(news_data)
+        return await self.generate_news_analysis_response(news_data, user_query, news_query_used)
     
     def _generate_knowledge_response(self, state: Dict[str, Any]) -> str:
         """지식 응답 생성"""

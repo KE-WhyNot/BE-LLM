@@ -1,7 +1,102 @@
-# 금융 챗봇 서비스 아키텍처 문서
+# 금융 챗봇 서비스 통합 아키텍처 문서
 
-> **최종 업데이트**: 2025-10-01  
-> **버전**: 2.0 (리팩토링 완료)
+> **최종 업데이트**: 2025-10-05  
+> **버전**: 3.0 (LangGraph 동적 프롬프팅 + Neo4j RAG 통합)
+
+---
+
+## 📋 목차
+
+1. [시스템 개요](#시스템-개요)
+2. [클린코드 6원칙 준수](#클린코드-6원칙-준수)
+3. [프로젝트 구조](#프로젝트-구조)
+4. [핵심 아키텍처](#핵심-아키텍처)
+5. [LangGraph 동적 프롬프팅](#langgraph-동적-프롬프팅)
+6. [Neo4j RAG 시스템](#neo4j-rag-시스템)
+7. [뉴스 처리 플로우](#뉴스-처리-플로우)
+8. [서비스 통합 맵](#서비스-통합-맵)
+9. [실행 흐름 예시](#실행-흐름-예시)
+10. [성능 최적화](#성능-최적화)
+
+---
+
+## 🎯 시스템 개요
+
+### 핵심 기능
+
+1. **LangGraph 기반 동적 워크플로우**
+   - 쿼리 복잡도에 따른 지능형 서비스 선택
+   - 동적 프롬프트 생성으로 맥락 기반 응답
+   - 병렬 처리를 통한 성능 최적화
+
+2. **Neo4j 지식그래프 RAG**
+   - 매일경제 RSS 피드 자동 수집 (수동 업데이트)
+   - KF-DeBERTa 임베딩 (카카오뱅크 금융 특화 모델)
+   - 의미 기반 뉴스 검색 및 관계 분석
+
+3. **실시간 뉴스 번역**
+   - Google RSS에서 실시간 뉴스 수집
+   - 한국어 자동 번역 (사용자 요청 시)
+   - 다국어 뉴스 통합 제공
+
+4. **통합 금융 데이터**
+   - yfinance API 실시간 주가 조회
+   - ChromaDB 벡터 검색 (금융 지식)
+   - 차트 시각화 및 분석
+
+---
+
+## 📐 클린코드 6원칙 준수
+
+### 1. **단일 책임 원칙 (SRP - Single Responsibility Principle)**
+```
+✅ 각 서비스는 하나의 명확한 책임만 가짐
+- query_classifier_service.py → 쿼리 분류만
+- financial_data_service.py → 금융 데이터 조회만
+- news_service.py → 뉴스 조회 및 번역만
+- mk_rss_scraper.py → 매일경제 RSS 수집 및 임베딩만
+```
+
+### 2. **개방-폐쇄 원칙 (OCP - Open/Closed Principle)**
+```
+✅ 확장에는 열려있고 수정에는 닫혀있음
+- 새로운 뉴스 소스 추가 시 기존 코드 수정 없이 확장 가능
+- 새로운 LLM 모델 추가 시 model_selector.py만 수정
+- 새로운 워크플로우 노드 추가 시 기존 노드 영향 없음
+```
+
+### 3. **리스코프 치환 원칙 (LSP - Liskov Substitution Principle)**
+```
+✅ 인터페이스 일관성 유지
+- 모든 서비스는 동일한 인터페이스 패턴 사용
+- NewsService는 mk_rss_scraper와 google_rss를 동일하게 처리
+- RAG 서비스는 ChromaDB와 Neo4j를 투명하게 전환 가능
+```
+
+### 4. **인터페이스 분리 원칙 (ISP - Interface Segregation Principle)**
+```
+✅ 필요한 인터페이스만 의존
+- workflow_components는 필요한 서비스만 import
+- langgraph_enhanced는 독립적인 컴포넌트 구조
+- 각 서비스는 자신이 필요한 유틸리티만 사용
+```
+
+### 5. **의존성 역전 원칙 (DIP - Dependency Inversion Principle)**
+```
+✅ 추상화에 의존, 구체화에 의존하지 않음
+- 서비스는 구체적인 구현이 아닌 인터페이스에 의존
+- LLM 선택은 추상 레이어를 통해 처리
+- 데이터 소스 변경 시 서비스 코드 수정 불필요
+```
+
+### 6. **DRY 원칙 (Don't Repeat Yourself)**
+```
+✅ 코드 중복 최소화
+- stock_utils.py: 주식 심볼 매핑 통합
+- prompt_manager.py: 프롬프트 템플릿 중앙 관리
+- formatters.py: 데이터 포맷팅 공통화
+- error_handler.py: 에러 처리 로직 통합
+```
 
 ---
 
@@ -10,894 +105,605 @@
 ```
 app/
 ├── services/
-│   ├── chatbot/                          # 🤖 챗봇 메인
-│   │   ├── chatbot_service.py           # 메인 진입점
-│   │   └── financial_workflow.py        # LangGraph 분기 처리
+│   ├── chatbot/                              # 🤖 메인 챗봇 서비스
+│   │   ├── chatbot_service.py               # 진입점
+│   │   └── financial_workflow.py            # LangGraph 워크플로우
 │   │
-│   ├── workflow_components/              # ⚙️ 워크플로우 구성 요소
-│   │   ├── query_classifier_service.py  # LLM 쿼리 분류
-│   │   ├── financial_data_service.py    # 데이터 조회
-│   │   ├── analysis_service.py          # 데이터 분석
-│   │   ├── news_service.py              # 뉴스 조회
-│   │   └── response_generator_service.py # 응답 생성
+│   ├── langgraph_enhanced/                   # 🧠 지능형 워크플로우 (NEW)
+│   │   ├── simplified_intelligent_workflow.py # 메인 워크플로우
+│   │   ├── prompt_manager.py                # 동적 프롬프트 생성
+│   │   ├── llm_manager.py                   # LLM 통합 관리
+│   │   ├── model_selector.py                # 모델 선택 로직
+│   │   ├── error_handler.py                 # 통합 에러 처리
+│   │   └── components/                      # 워크플로우 컴포넌트
+│   │       ├── query_complexity_analyzer.py  # 쿼리 복잡도 분석
+│   │       ├── service_planner.py           # 서비스 실행 계획
+│   │       ├── service_executor.py          # 병렬 서비스 실행
+│   │       ├── result_combiner.py           # 결과 조합
+│   │       └── confidence_calculator.py     # 신뢰도 계산
 │   │
-│   ├── portfolio/                        # 💼 포트폴리오
-│   │   └── portfolio_advisor.py         # 포트폴리오 제안
+│   ├── workflow_components/                  # ⚙️ 워크플로우 구성 요소
+│   │   ├── query_classifier_service.py      # LLM 쿼리 분류
+│   │   ├── financial_data_service.py        # 금융 데이터 조회
+│   │   ├── analysis_service.py              # 데이터 분석
+│   │   ├── news_service.py                  # 뉴스 통합 서비스 (UPDATED)
+│   │   ├── mk_rss_scraper.py                # 매일경제 RSS + Neo4j (NEW)
+│   │   ├── data_agent_service.py            # 데이터 에이전트
+│   │   ├── visualization_service.py         # 차트 시각화
+│   │   └── response_generator_service.py    # 응답 생성
 │   │
-│   └── (공통 서비스)                     # 🔧 유틸리티
-│       ├── rag_service.py               # RAG 엔진
-│       ├── knowledge_base_service.py    # 지식 베이스
-│       ├── monitoring_service.py        # 모니터링
-│       └── formatters.py                # 포맷터
+│   ├── portfolio/                            # 💼 포트폴리오
+│   │   └── portfolio_advisor.py             # 포트폴리오 제안
+│   │
+│   └── (공통 서비스)                         # 🔧 유틸리티
+│       ├── rag_service.py                   # ChromaDB RAG
+│       ├── monitoring_service.py            # 모니터링
+│       └── user_service.py                  # 사용자 관리
 │
 └── utils/
-    └── stock_utils.py                   # 주식 심볼 통합
+    ├── stock_utils.py                       # 주식 심볼 통합
+    ├── common_utils.py                      # 공통 유틸리티
+    └── formatters/
+        └── formatters.py                    # 데이터 포맷터
 ```
 
 ---
 
-## 🔄 전체 처리 플로우
+## 🏗️ 핵심 아키텍처
 
-```
-1. 사용자 입력
-   "삼성전자 주가 알려줘"
-    ↓
+### 전체 시스템 흐름
 
-2. FastAPI Router
-   📁 app/routers/chat.py
-   ├─► @router.post("/chat")
-   └─► handle_chat_request()
-    ↓
-
-3. ChatbotService (메인 엔트리 포인트)
-   📁 app/services/chatbot/chatbot_service.py
-   ├─► process_chat_request(request: ChatRequest)
-   ├─► 모니터링 시작 (시간 측정)
-   └─► financial_workflow.process_query() 호출
-    ↓
-
-4. FinancialWorkflow
-   📁 app/services/chatbot/financial_workflow.py
-   ├─► process_query(user_query: str)
-   ├─► 초기 상태 생성 (FinancialWorkflowState)
-   └─► LangGraph 워크플로우 실행
-    ↓
-
-5. LangGraph StateGraph 실행
-   📁 app/services/chatbot/financial_workflow.py
-   ├─► StateGraph 컴파일된 워크플로우
-   └─► Entry Point: classify_query 노드
-    ↓
-
-6. classify_query 노드
-   📁 app/services/chatbot/financial_workflow.py
-   ├─► _classify_query(state)
-   └─► query_classifier.classify() 호출
-    ↓
-
-7. QueryClassifier
-   📁 app/services/workflow_components/query_classifier_service.py
-   ├─► classify(query: str)
-   ├─► _classify_with_llm() (Gemini 2.0 Flash)
-   │   └─► 5가지 카테고리 분류
-   └─► _classify_with_keywords() (폴백)
-    ↓
-
-8. 조건부 분기 (Conditional Edges)
-   📁 app/services/chatbot/financial_workflow.py
-   ├─► _route_after_classification()
-   └─► query_type에 따른 라우팅:
-       ├─► "data" → get_financial_data
-       ├─► "analysis" → get_financial_data
-       ├─► "news" → get_news
-       ├─► "knowledge" → search_knowledge
-       └─► "general" → generate_response
-    ↓
-
-9. 각 서비스 호출
-   📁 app/services/workflow_components/
-   ├─► financial_data_service.py
-   │   └─► get_financial_data(query)
-   │       ├─► stock_utils.extract_symbol()
-   │       └─► rag_service.get_financial_data()
-   │
-   ├─► analysis_service.py
-   │   └─► analyze_financial_data(data)
-   │
-   ├─► news_service.py
-   │   └─► get_financial_news(query)
-   │
-   └─► response_generator_service.py
-       └─► generate_*_response()
-    ↓
-
-10. Response Generator
-    📁 app/services/workflow_components/response_generator_service.py
-    ├─► generate_data_response()
-    ├─► generate_analysis_response()
-    ├─► generate_news_response()
-    ├─► generate_knowledge_response()
-    └─► generate_general_response()
-    ↓
-
-11. 최종 응답 반환
-    📁 app/services/chatbot/chatbot_service.py
-    ├─► ChatResponse 생성
-    └─► monitoring_service.trace_query()
-    ↓
-
-12. 클라이언트 응답
-    FastAPI Router → JSON 응답
+```mermaid
+graph TD
+    A[사용자 쿼리] --> B[FastAPI Router]
+    B --> C[ChatbotService]
+    C --> D{LangGraph Enhanced?}
+    
+    D -->|복잡한 쿼리| E[SimplifiedIntelligentWorkflow]
+    D -->|단순한 쿼리| F[FinancialWorkflow]
+    
+    E --> G[QueryComplexityAnalyzer]
+    G --> H[ServicePlanner]
+    H --> I[ServiceExecutor 병렬 실행]
+    I --> J[ResultCombiner]
+    J --> K[PromptManager 동적 프롬프트]
+    K --> L[LLM 응답 생성]
+    
+    F --> M[QueryClassifier]
+    M --> N{쿼리 타입}
+    
+    N -->|data| O[FinancialDataService]
+    N -->|analysis| P[AnalysisService]
+    N -->|news| Q[NewsService]
+    N -->|knowledge| R[RAG Service]
+    N -->|visualization| S[VisualizationService]
+    
+    Q --> T{뉴스 소스}
+    T -->|매일경제| U[MKRSSScraper + Neo4j]
+    T -->|Google RSS| V[실시간 뉴스 + 번역]
+    
+    L --> W[최종 응답]
+    O --> X[ResponseGenerator]
+    P --> X
+    Q --> X
+    R --> X
+    S --> X
+    X --> W
 ```
 
 ---
 
-## 🎯 상세 분기 처리
+## 🧠 LangGraph 동적 프롬프팅
 
-### 1. Query Classifier (쿼리 분류)
-
-**파일**: `workflow_components/query_classifier_service.py`
-
-**분류 프로세스**:
+### 1. 쿼리 복잡도 분석
 
 ```python
-def classify(query: str) -> str:
-    """
-    Input: "삼성전자 주가 알려줘"
+# app/services/langgraph_enhanced/components/query_complexity_analyzer.py
+
+class QueryComplexityAnalyzer:
+    """쿼리 복잡도를 분석하여 필요한 서비스 결정"""
     
-    1단계: LLM 분류 시도 (Gemini 2.0 Flash)
-       ├─► 프롬프트 전송
-       ├─► 5가지 카테고리 중 선택
-       └─► data/analysis/news/knowledge/general
-    
-    2단계: LLM 실패 시 키워드 폴백
-       ├─► 명확한 키워드 우선
-       │   - "주가/가격/시세" → data
-       │   - "뉴스/소식" → news
-       │   - "뜻/의미" → knowledge
-       │
-       ├─► 종목명 + 키워드 조합
-       │   - 종목명 + "분석/전망" → analysis
-       │   - 종목명 + "주식" → data
-       │   - 종목명만 → data
-       │
-       └─► 기타 → general
-    
-    Output: "data"
+    def analyze_complexity(self, query: str) -> ComplexityAnalysis:
+        """
+        복잡도 레벨:
+        - SIMPLE: 단일 서비스 (예: "삼성전자 주가")
+        - MODERATE: 2-3개 서비스 (예: "삼성전자 분석하고 뉴스도 알려줘")
+        - COMPLEX: 4개 이상 서비스 (예: "삼성전자 전체 분석")
+        
+        필요 서비스 자동 감지:
+        - financial_data: 주가, 시세 키워드
+        - analysis: 분석, 투자 키워드
+        - news: 뉴스, 동향 키워드
+        - knowledge: 용어, 개념 키워드
+        - visualization: 차트, 그래프 키워드
     """
 ```
 
-**카테고리 정의**:
-- **data**: 실시간 주가, 시세 조회
-- **analysis**: 투자 분석, 전망, 추천
-- **news**: 뉴스, 최신 소식, 동향
-- **knowledge**: 금융 용어, 개념 설명
-- **general**: 인사, 잡담, 기타
-
----
-
-### 2. Financial Data Service (데이터 조회)
-
-**파일**: `workflow_components/financial_data_service.py`
-
-**처리 과정**:
+### 2. 서비스 실행 계획
 
 ```python
-def get_financial_data(query: str) -> Dict:
-    """
-    Input: "삼성전자 주가"
+# app/services/langgraph_enhanced/components/service_planner.py
+
+class ServicePlanner:
+    """서비스 실행 계획 수립"""
     
-    1단계: 심볼 추출 (stock_utils 사용)
-       ├─► extract_symbol_from_query(query)
-       ├─► 띄어쓰기 제거: "삼성 전자" → "삼성전자"
-       ├─► 매핑 검색: STOCK_SYMBOL_MAPPING
-       │   └─► "삼성전자" → "005930.KS"
-       ├─► 패턴 매칭: 
-       │   - 완전한 심볼: "005930.KS"
-       │   - 숫자만: "005930" → "005930.KS"
-       └─► Output: "005930.KS"
-    
-    2단계: 데이터 조회 (rag_service 사용)
-       ├─► get_financial_data("005930.KS")
-       ├─► yfinance API 호출
-       └─► {
-             symbol: "005930.KS",
-             current_price: 86000,
-             volume: 23156553,
-             pe_ratio: 12.5,
-             sector: "Technology",
-             ...
-           }
-    
-    Output: 금융 데이터 객체
+    def create_service_plan(self, 
+                           required_services: List[str],
+                           complexity_level: str,
+                           context: Dict) -> ServicePlan:
+        """
+        실행 계획:
+        1. 병렬 실행 가능 서비스 그룹핑
+           - Group 1: financial_data, news (동시 실행 가능)
+           - Group 2: analysis (데이터 필요, 순차 실행)
+        
+        2. 실행 순서 최적화
+           - 의존성 있는 서비스는 순차 실행
+           - 독립적인 서비스는 병렬 실행
+        
+        3. 타임아웃 설정
+           - SIMPLE: 5초
+           - MODERATE: 10초
+           - COMPLEX: 15초
     """
 ```
 
----
-
-### 3. Analysis Service (데이터 분석)
-
-**파일**: `workflow_components/analysis_service.py`
-
-**분석 로직**:
+### 3. 동적 프롬프트 생성
 
 ```python
-def analyze_financial_data(data: Dict) -> str:
-    """
-    Input: {current_price: 86000, price_change_percent: 3.24, ...}
+# app/services/langgraph_enhanced/prompt_manager.py
+
+class PromptManager:
+    """동적 프롬프트 생성"""
     
-    분석 항목:
-    
-    1. 가격 변화 분석
-       ├─► price_change_percent > 0
-       │   └─► "📈 긍정적 신호: 전일 대비 +3.24% 상승"
-       └─► price_change_percent < 0
-           └─► "📉 부정적 신호: 전일 대비 하락"
-    
-    2. 거래량 분석
-       ├─► volume > 1,000,000
-       │   └─► "🔥 높은 관심도: 거래량 23,156,553주"
-       └─► else
-           └─► "📊 보통 거래량"
-    
-    3. PER 분석
-       ├─► PE < 15
-       │   └─► "💰 저평가: PER 12.5 (투자 매력도 높음)"
-       ├─► PE 15-25
-       │   └─► "📊 적정가"
-       └─► PE > 25
-           └─► "⚠️ 고평가: 투자 주의 필요"
-    
-    4. 섹터 정보
-       └─► "🏢 섹터: Technology"
-    
-    Output: 
-    "📈 긍정적 신호: 전일 대비 +3.24% 상승
-     🔥 높은 관심도: 거래량 23,156,553주
-     💰 저평가: PER 12.5
-     🏢 섹터: Technology"
-    """
+    def generate_analysis_prompt(self, 
+                                financial_data: Dict,
+                                user_query: str,
+                                user_context: Optional[Dict] = None) -> str:
+        """
+        사용자 맥락 기반 동적 프롬프트:
+        
+        1. 기본 프롬프트 (user_context 없음)
+           - 표준 분석 템플릿 사용
+           - 객관적 데이터 분석
+        
+        2. 맞춤형 프롬프트 (user_context 있음)
+           - 사용자 투자 경험 수준 반영
+           - 리스크 허용도 고려
+           - 투자 목표에 맞는 조언
+        
+        3. 실시간 데이터 반영
+           - 최신 주가 정보
+           - 뉴스 감정 분석
+           - 시장 상황
+        """
 ```
 
----
-
-### 4. Response Generator (응답 생성)
-
-**파일**: `workflow_components/response_generator_service.py`
-
-**응답 생성 분기**:
+### 4. 병렬 서비스 실행
 
 ```python
-def generate_response(query_type: str, data: Any) -> str:
-    """
-    query_type에 따른 분기:
+# app/services/langgraph_enhanced/components/service_executor.py
+
+class ServiceExecutor:
+    """서비스 병렬 실행"""
     
-    ┌─────────────────────────────────────────────────┐
-    │ data                                            │
-    ├─────────────────────────────────────────────────┤
-    │ generate_data_response(financial_data)          │
-    │   └─► stock_data_formatter.format_stock_data()  │
-    │       └─► "주식 정보 (Samsung - 005930.KS):    │
-    │             - 현재가: 86,000원                  │
-    │             - 전일대비: +2,700원 (+3.24%)       │
-    │             - 거래량: 23,156,553주              │
-    │             ..."                                │
-    └─────────────────────────────────────────────────┘
-    
-    ┌─────────────────────────────────────────────────┐
-    │ analysis                                        │
-    ├─────────────────────────────────────────────────┤
-    │ generate_analysis_response(financial_data)      │
-    │   └─► analysis_formatter.format_stock_analysis()│
-    │       └─► "분석 결과:                           │
-    │             📈 긍정적 신호: +3.24% 상승         │
-    │             💰 저평가: PER 12.5                 │
-    │             💚 매수 추천                        │
-    │             ..."                                │
-    └─────────────────────────────────────────────────┘
-    
-    ┌─────────────────────────────────────────────────┐
-    │ news                                            │
-    ├─────────────────────────────────────────────────┤
-    │ generate_news_response(news_data)               │
-    │   └─► news_formatter.format_news_list()         │
-    │       └─► "📰 금융 뉴스 (총 5건):               │
-    │             1. Samsung announces...             │
-    │                📅 2025-10-01                    │
-    │                💡 영향도: 긍정적 (높음)         │
-    │             ..."                                │
-    └─────────────────────────────────────────────────┘
-    
-    ┌─────────────────────────────────────────────────┐
-    │ knowledge                                       │
-    ├─────────────────────────────────────────────────┤
-    │ generate_knowledge_response(context)            │
-    │   └─► "📚 금융 지식:                            │
-    │         PER은 주가를 주당순이익으로 나눈 값...  │
-    │         ..."                                    │
-    └─────────────────────────────────────────────────┘
-    
-    ┌─────────────────────────────────────────────────┐
-    │ general                                         │
-    ├─────────────────────────────────────────────────┤
-    │ generate_general_response()                     │
-    │   └─► "안녕하세요! 금융 전문가 챗봇입니다.     │
-    │         주식 정보, 투자 분석, 금융 뉴스...     │
-    │         ..."                                    │
-    └─────────────────────────────────────────────────┘
-    """
+    def execute_services_parallel(self, 
+                                  service_plan: ServicePlan,
+                                  query: str) -> Dict[str, Any]:
+        """
+        병렬 실행 전략:
+        
+        1. ThreadPoolExecutor 사용
+           - 최대 5개 스레드
+           - I/O 바운드 작업에 최적화
+        
+        2. 실행 그룹별 처리
+           - Group 1: 데이터 조회 (병렬)
+           - Group 2: 분석 (순차, 데이터 의존)
+           - Group 3: 응답 생성 (순차, 모든 결과 의존)
+        
+        3. 에러 처리
+           - 개별 서비스 실패 시 계속 진행
+           - 필수 서비스 실패 시 폴백
+        """
 ```
 
 ---
 
-## 🔧 핵심 유틸리티
+## 🗄️ Neo4j RAG 시스템
 
-### Stock Utils (통합 심볼 매핑)
-
-**파일**: `utils/stock_utils.py`
-
-**기능**:
+### 1. 매일경제 RSS 수집 (수동 업데이트)
 
 ```python
-# 1. 단일 심볼 추출 (데이터 조회용)
-extract_symbol_from_query("삼성전자 주가")
-→ "005930.KS"
-
-# 띄어쓰기 처리
-extract_symbol_from_query("현대 차 시세")
-→ "005380.KS"
-
-# 숫자 패턴
-extract_symbol_from_query("005930 현재가")
-→ "005930.KS"
-
-# 2. 다중 심볼 추출 (뉴스 조회용)
-extract_symbols_for_news("삼성전자 뉴스")
-→ ["005930.KS", "SSNLF"]  # 한국 + 미국 티커
-
-# 3. 역검색
-get_company_name_from_symbol("005930.KS")
-→ "삼성전자"
-
-# 4. 유효성 검증
-is_valid_symbol("005930.KS")  → True
-is_valid_symbol("AAPL")       → True
-is_valid_symbol("INVALID")    → False
-```
-
-**통합 매핑 (30+ 종목)**:
-```python
-STOCK_SYMBOL_MAPPING = {
-    "삼성전자": "005930.KS",
-    "sk하이닉스": "000660.KS",
-    "네이버": "035420.KS",
-    "카카오": "035720.KS",
-    "현대차": "005380.KS",
-    "기아": "000270.KS",
-    # ... 30+ 종목
-}
-```
-
----
-
-## 📝 실제 사용 예시
-
-### 예시 1: "삼성전자 주가 알려줘"
-
-```
-Step 1: FastAPI Router
-📁 app/routers/chat.py
-├─► POST /chat 요청 수신
-└─► handle_chat_request() 호출
-
-Step 2: ChatbotService (엔트리 포인트)
-📁 app/services/chatbot/chatbot_service.py
-├─► process_chat_request(ChatRequest)
-├─► 모니터링 시작 (start_time)
-└─► financial_workflow.process_query() 호출
-
-Step 3: FinancialWorkflow
-📁 app/services/chatbot/financial_workflow.py
-├─► process_query("삼성전자 주가 알려줘")
-├─► FinancialWorkflowState 초기화
-└─► LangGraph 워크플로우 실행
-
-Step 4: Query Classifier
-📁 app/services/workflow_components/query_classifier_service.py
-├─► classify("삼성전자 주가 알려줘")
-├─► _classify_with_llm() → Gemini 2.0 Flash
-└─► 분류 결과: "data"
-
-Step 5: Financial Data Service
-📁 app/services/workflow_components/financial_data_service.py
-├─► get_financial_data("삼성전자 주가 알려줘")
-├─► stock_utils.extract_symbol() → "005930.KS"
-└─► rag_service.get_financial_data("005930.KS")
-
-Step 6: RAG Service
-📁 app/services/rag_service.py
-└─► get_financial_data("005930.KS")
-    └─► yfinance API → {current_price: 86000, ...}
-
-Step 7: Analysis Service
-📁 app/services/workflow_components/analysis_service.py
-└─► analyze_financial_data(data)
-    └─► "📈 긍정적 신호: +3.24% 상승..."
-
-Step 8: Response Generator
-📁 app/services/workflow_components/response_generator_service.py
-├─► generate_data_response(data)
-└─► stock_data_formatter.format_stock_data()
-    └─► "주식 정보 (Samsung Electronics - 005930.KS):
-          - 현재가: 86,000원
-          - 전일대비: +2,700원 (+3.24%)
-          - 거래량: 23,156,553주
-          ..."
-
-Step 9: 최종 응답
-📁 app/services/chatbot/chatbot_service.py
-├─► ChatResponse 생성
-└─► monitoring_service.trace_query()
-
-처리 시간: ~2.3초
-```
-
-### 예시 2: "하이닉스 투자해도 될까?"
-
-```
-Step 1: FastAPI Router
-📁 app/routers/chat.py
-├─► POST /chat 요청 수신
-└─► handle_chat_request() 호출
-
-Step 2: ChatbotService (엔트리 포인트)
-📁 app/services/chatbot/chatbot_service.py
-├─► process_chat_request(ChatRequest)
-├─► 모니터링 시작 (start_time)
-└─► financial_workflow.process_query() 호출
-
-Step 3: FinancialWorkflow
-📁 app/services/chatbot/financial_workflow.py
-├─► process_query("하이닉스 투자해도 될까?")
-├─► FinancialWorkflowState 초기화
-└─► LangGraph 워크플로우 실행
-
-Step 4: Query Classifier
-📁 app/services/workflow_components/query_classifier_service.py
-├─► classify("하이닉스 투자해도 될까?")
-├─► _classify_with_llm() → Gemini 2.0 Flash
-└─► 분류 결과: "analysis"
-
-Step 5: Financial Data Service
-📁 app/services/workflow_components/financial_data_service.py
-├─► get_financial_data("하이닉스 투자해도 될까?")
-├─► stock_utils.extract_symbol() → "000660.KS"
-└─► rag_service.get_financial_data("000660.KS")
-
-Step 6: Analysis Service
-📁 app/services/workflow_components/analysis_service.py
-├─► analyze_financial_data(data)
-└─► 투자 추천 의견 생성
-
-Step 7: Response Generator
-📁 app/services/workflow_components/response_generator_service.py
-├─► generate_analysis_response(analysis)
-└─► "분석 결과:
-      📈 긍정적 신호: +2.5% 상승
-      🔥 높은 관심도: 거래량 높음
-      💰 저평가: PER 12.3
-      💚 매수 추천
-      
-      주요 근거:
-      - 강한 상승 추세
-      - 저평가 구간
-      - 높은 거래량
-      
-      ⚠️ 주의: 이는 참고 의견이며..."
-
-Step 8: 최종 응답
-📁 app/services/chatbot/chatbot_service.py
-├─► ChatResponse 생성
-└─► monitoring_service.trace_query()
-
-처리 시간: ~2.5초
-```
-
-### 예시 3: "PER이 뭐야?"
-
-```
-Step 1: FastAPI Router
-📁 app/routers/chat.py
-├─► POST /chat 요청 수신
-└─► handle_chat_request() 호출
-
-Step 2: ChatbotService (엔트리 포인트)
-📁 app/services/chatbot/chatbot_service.py
-├─► process_chat_request(ChatRequest)
-├─► 모니터링 시작 (start_time)
-└─► financial_workflow.process_query() 호출
-
-Step 3: FinancialWorkflow
-📁 app/services/chatbot/financial_workflow.py
-├─► process_query("PER이 뭐야?")
-├─► FinancialWorkflowState 초기화
-└─► LangGraph 워크플로우 실행
-
-Step 4: Query Classifier
-📁 app/services/workflow_components/query_classifier_service.py
-├─► classify("PER이 뭐야?")
-├─► _classify_with_llm() → Gemini 2.0 Flash
-└─► 분류 결과: "knowledge"
-
-Step 5: RAG Service
-📁 app/services/rag_service.py
-├─► get_context_for_query("PER이 뭐야?")
-├─► vectorstore.similarity_search(k=3)
-└─► Chroma DB에서 관련 문서 검색
-
-Step 6: Response Generator
-📁 app/services/workflow_components/response_generator_service.py
-├─► generate_knowledge_response(context)
-└─► "📚 금융 지식:
-      
-      PER(주가수익비율)은 주가를 주당순이익으로
-      나눈 값으로, 기업의 가치를 평가하는 지표입니다.
-      
-      - PER < 15: 저평가
-      - PER 15-25: 적정가
-      - PER > 25: 고평가
-      
-      예를 들어, 삼성전자의 PER이 12.5라면
-      주당순이익 대비 주가가 낮아 저평가된 상태입니다."
-
-Step 7: 최종 응답
-📁 app/services/chatbot/chatbot_service.py
-├─► ChatResponse 생성
-└─► monitoring_service.trace_query()
-
-처리 시간: ~1.8초
-```
-
----
-
-## 🔑 핵심 서비스 설명
-
-### 📁 formatters.py (데이터 포맷터)
-
-**위치**: `app/services/formatters.py`
-
-**역할**: 원시 데이터를 사용자가 읽기 좋은 텍스트로 변환
-
-#### **3가지 포맷터 클래스**
-
-##### 1. FinancialDataFormatter (주식 데이터 포맷터)
-```python
-stock_data_formatter.format_stock_data(data, symbol)
-
-# 입력 (원시 데이터)
-{
-    "current_price": 86000,
-    "price_change": 2700,
-    "price_change_percent": 3.24,
-    "volume": 23156553,
-    ...
-}
-
-# 출력 (예쁜 텍스트)
-"""
-주식 정보 (Samsung Electronics - 005930.KS):
-- 현재가: 86,000원
-- 전일대비: +2,700원 (+3.24%)
-- 거래량: 23,156,553주
-- 고가: 88,000원
-- 저가: 85,000원
-- 시가: 85,500원
-- 시가총액: 5,160,000,000,000원
-- PER: 12.5
-- 배당수익률: 2.5%
-- 섹터: Technology
-- 조회시간: 2025-10-01T14:30:00
-"""
-```
-
-##### 2. NewsFormatter (뉴스 포맷터)
-```python
-news_formatter.format_news_list(news_list)
-
-# 기능
-├─► 📰 뉴스 제목, 요약, 링크 정리
-├─► 📊 영향도 분석 (긍정/부정/중립)
-├─► 📈 전체 시장 감정 분석
-├─► 💡 자동 투자 인사이트 생성
-└─► 🎯 평균 영향도 계산
-
-# 출력 예시
-"""
-📰 최신 뉴스 요약:
-
-1. **삼성전자, 3분기 실적 호조 전망**
-   📝 반도체 업황 회복으로 실적 개선 예상
-   📅 2025-10-01
-   🔗 https://finance.yahoo.com/...
-   📊 영향도: 긍정적 (80점)
-   🎯 시장 영향: 높음 - 주가에 큰 영향 예상
-
-🔍 **뉴스 분석 및 시장 전망:**
-• 📈 **전체 시장 감정**: 긍정적
-• 📊 **평균 영향도**: 75.0점
-• 📈 **긍정적 뉴스**: 4개
-• 📉 **부정적 뉴스**: 1개
-
-💡 **투자 인사이트:**
-• 강한 긍정적 신호로 주가 상승 가능성 높음
-• 단기적으로 매수 관심 증가 예상
-"""
-```
-
-##### 3. AnalysisFormatter (분석 포맷터)
-```python
-analysis_formatter.format_stock_analysis(data, symbol)
-
-# 분석 항목
-├─► 가격 변화 분석 (상승/하락/안정)
-├─► 거래량 분석 (활발/평범)
-├─► PER 분석 (저평가/적정/고평가)
-└─► 투자 고려사항 제시
-
-# 출력 예시
-"""
-📊 **Samsung Electronics (005930.KS) 분석 결과**
-
-**기본 정보:**
-- 현재가: 86,000원
-- 전일대비: +2,700원 (+3.24%)
-- 거래량: 23,156,553주
-- 시가총액: 5,160,000,000,000원
-
-**분석 결과:**
-• 강한 상승세를 보이고 있습니다.
-• 거래량이 활발합니다.
-• PER이 낮아 상대적으로 저평가된 상태입니다.
-
-**투자 고려사항:**
-• 기술적 분석과 기본적 분석을 함께 고려하세요
-• 시장 상황과 업종 동향을 파악하세요
-• 리스크 관리와 분산투자를 권장합니다
-"""
-```
-
----
-
-### 📁 rag_service.py (RAG 서비스)
-
-**위치**: `app/services/rag_service.py`  
-**라인 수**: 132줄
-
-**역할**: ChromaDB 벡터 스토어 관리 및 금융 지식 검색 (순수 RAG)
-
----
-
-#### **핵심 기능**
-
-##### ✅ **벡터 스토어 관리**
-
-```python
-# ChromaDB 벡터 스토어 초기화
-__init__(persist_directory="./chroma_db")
-├─► HuggingFace Embeddings 로드
-│   └─► kakaobrain/kor-base (카카오 한국어 임베딩)
-├─► ChromaDB 벡터 스토어 연결
-└─► 문서 분할기 설정 (chunk_size=1000, overlap=200)
-```
-
-##### ✅ **문서 추가 및 검색**
-
-```python
-# 1. 문서 추가 (knowledge_base_service에서 호출)
-add_financial_documents(documents)
-├─► 문서를 1000자 단위로 분할
-├─► 벡터 임베딩 생성
-└─► ChromaDB에 저장
-
-# 2. 유사도 검색
-search_relevant_documents(query: str, k=5)
-├─► 쿼리 임베딩 생성
-├─► ChromaDB 유사도 검색
-└─► 상위 k개 문서 반환
-
-# 3. 컨텍스트 생성 (financial_workflow.py에서 호출)
-get_context_for_query(query: str) -> str
-├─► 관련 금융 지식 문서 검색 (k=3)
-├─► "PER이 뭐야?" → data/ 폴더의 txt 파일에서 검색
-└─► 컨텍스트 텍스트 반환
-```
-
----
-
-#### **실제 사용 흐름**
-
-```python
-1. 지식베이스 초기화 (수동, 1회)
-   📁 knowledge_base_service.py
-   └─► build_from_data_directory()
-       └─► rag_service.add_financial_documents()
-           └─► data/*.txt 파일들을 ChromaDB에 저장
-
-2. knowledge 쿼리 처리 ("PER이 뭐야?")
-   📁 financial_workflow.py
-   └─► _search_knowledge()
-       └─► rag_service.get_context_for_query()
-           └─► ChromaDB 벡터 검색 ✅
-```
-
----
-
-#### **기술 스택**
-
-- **Vector DB**: ChromaDB (./chroma_db)
-- **Embeddings**: HuggingFace kakaobrain/kor-base (카카오 한국어 임베딩)
-- **Text Splitting**: RecursiveCharacterTextSplitter (chunk_size=1000, overlap=200)
-- **데이터 소스**: `data/` 폴더의 txt 파일들
-
----
-
-### 📁 external_api_service.py (외부 API 서비스)
-
-**위치**: `app/services/external_api_service.py`  
-**라인 수**: 211줄
-
-**역할**: yfinance, Yahoo Finance RSS 등 외부 API 호출 중앙화
-
----
-
-#### **핵심 기능**
-
-##### ✅ **1. yfinance API 래퍼**
-
-```python
-get_stock_data(symbol: str) -> Dict
-├─► yfinance.Ticker(symbol).history()
-├─► 주식 기본 정보 수집
-│   ├─► 현재가, 거래량, 고가, 저가
-│   ├─► 시가총액, PER, 배당수익률
-│   └─► 회사명, 섹터 정보
-└─► 가격 변화율 계산
-
-# 호출 체인
-workflow_components/financial_data_service.py
-  └─► external_api_service.get_stock_data()
-      └─► yfinance API
-```
-
-##### ✅ **2. Yahoo Finance RSS 래퍼**
-
-```python
-get_news_from_rss(query: str) -> List[Dict]
-├─► stock_utils로 심볼 자동 추출
-├─► feedparser로 RSS 파싱
-├─► 뉴스별 영향도 분석 (키워드 기반)
-│   ├─► 긍정/부정 키워드 탐지
-│   ├─► 영향도 점수 계산 (0-100)
-│   └─► 시장 영향 예측 (높음/중간/낮음)
-└─► 뉴스 리스트 반환
-
-# 호출 체인
-workflow_components/news_service.py
-  └─► external_api_service.get_news_from_rss()
-      └─► Yahoo Finance RSS
-```
-
-##### ✅ **3. 뉴스 영향도 분석**
-
-```python
-_analyze_news_impact(title, summary)
-├─► 긍정 키워드: 상승, 증가, 성장, rise, gain...
-├─► 부정 키워드: 하락, 감소, 위험, fall, loss...
-├─► 점수 계산: keyword_count * 20 (최대 100)
-└─► {
-      impact_score: 80,
-      impact_direction: "긍정적",
-      market_impact: "높음 - 주가에 큰 영향 예상"
+# app/services/workflow_components/mk_rss_scraper.py
+
+class MKNewsScraper:
+    """매일경제 RSS 피드 스크래퍼"""
+    
+    # RSS 피드 URL
+    rss_feeds = {
+        'economy': 'https://www.mk.co.kr/rss/30100041/',      # 경제
+        'politics': 'https://www.mk.co.kr/rss/30200030/',     # 정치
+        'securities': 'https://www.mk.co.kr/rss/50200011/',   # 증권
+        'international': 'https://www.mk.co.kr/rss/50100032/', # 국제
+        'headlines': 'https://www.mk.co.kr/rss/30000001/'     # 헤드라인
     }
+    
+    # KF-DeBERTa 임베딩 모델 (카카오뱅크 금융 특화)
+    embedding_model = SentenceTransformer('kakaobank/kf-deberta-base')
 ```
 
----
+### 2. 지식그래프 구조
 
-#### **실제 사용 흐름**
+```
+Neo4j 노드 구조:
+┌─────────────────────────────────────┐
+│ Article (기사 노드)                  │
+├─────────────────────────────────────┤
+│ - article_id: String (고유 ID)      │
+│ - title: String (제목)              │
+│ - link: String (URL)                │
+│ - published: DateTime (발행일)      │
+│ - category: String (카테고리)       │
+│ - content: String (본문)            │
+│ - summary: String (요약)            │
+│ - embedding: List<Float> (768차원)  │
+│ - created_at: DateTime              │
+│ - updated_at: DateTime              │
+└─────────────────────────────────────┘
+
+관계 구조:
+Article --[SIMILAR_TO {similarity: Float}]--> Article
+Article --[BELONGS_TO {category: String}]--> Category
+Article --[MENTIONS {entity: String}]--> Entity
+```
+
+### 3. 임베딩 기반 검색
 
 ```python
-1. 주식 데이터 조회
-   📁 financial_data_service.py
-   └─► external_api_service.get_stock_data("005930.KS")
-       └─► yfinance API
-
-2. 뉴스 조회
-   📁 news_service.py
-   └─► external_api_service.get_news_from_rss("삼성전자")
-       └─► Yahoo Finance RSS + 영향도 분석
+# 코사인 유사도 검색
+MATCH (a:Article)
+WHERE a.embedding IS NOT NULL
+WITH a, gds.similarity.cosine(a.embedding, $query_embedding) AS similarity
+WHERE similarity > 0.7
+RETURN a.title, a.summary, a.link, similarity
+ORDER BY similarity DESC
+LIMIT 10
 ```
 
----
-
-### 📁 knowledge_base_service.py (지식베이스 관리)
-
-**위치**: `app/services/knowledge_base_service.py`  
-**라인 수**: 73줄
-
-**역할**: `data/` 폴더의 txt 파일들을 로드하여 RAG 엔진에 전달
-
----
-
-#### **핵심 기능**
+### 4. 수동 업데이트 방법
 
 ```python
-build_from_data_directory()
-├─► DirectoryLoader로 data/*.txt 파일 로드
-│   └─► basic_financial.txt
-│   └─► fundamental_analysis.txt
-│   └─► investment_strategy.txt
-│   └─► korean_market.txt
-│   └─► market_analysis.txt
-│   └─► risk_management.txt
-│   └─► technical_analysis.txt
-├─► rag_service.add_financial_documents() 호출
-└─► ChromaDB에 벡터 저장
+# 매일경제 지식그래프 업데이트 (수동 실행)
+from app.services.workflow_components.mk_rss_scraper import update_mk_knowledge_graph
 
-# 실행 방법
-python app/services/knowledge_base_service.py
+# 최근 7일 뉴스 수집 + 임베딩 + Neo4j 저장
+result = await update_mk_knowledge_graph(days_back=7)
+
+# 결과:
+# {
+#   "execution_time": 45.2,
+#   "articles_collected": 250,
+#   "storage_stats": {
+#     "new_articles": 230,
+#     "updated_articles": 20
+#   },
+#   "status": "success"
+# }
 ```
 
 ---
 
-### 💡 **서비스 간 관계도**
+## 📰 뉴스 처리 플로우
 
+### 1. 뉴스 소스 분기
+
+```python
+# app/services/workflow_components/news_service.py
+
+class NewsService:
+    """통합 뉴스 서비스"""
+    
+    async def get_comprehensive_news(self, query: str) -> List[Dict]:
+        """
+        뉴스 소스 선택:
+        
+        1. 매일경제 Neo4j RAG (기본)
+           - 수동 업데이트된 한국 뉴스
+           - 임베딩 기반 의미 검색
+           - 관계 분석 포함
+        
+        2. Google RSS (실시간)
+           - 사용자 요청 시 실시간 뉴스
+           - 영어 뉴스 자동 번역
+           - 다국어 뉴스 통합
+        
+        3. 통합 응답
+           - 중복 제거 (URL 기준)
+           - 관련도 순 정렬
+           - 최대 10개 반환
+"""
 ```
-data/*.txt 파일들
-    ↓
-knowledge_base_service.py (파일 로드)
-    ↓
-rag_service.py (벡터 저장 및 검색)
-    ↓
-financial_workflow.py (knowledge 쿼리 시 사용)
 
-─────────────────────────────────
+### 2. 실시간 뉴스 번역
 
-external_api_service.py (yfinance, RSS)
-    ↓
-workflow_components/
-├─► financial_data_service.py (주식 데이터)
-└─► news_service.py (뉴스 데이터)
+```python
+# Google RSS → 한국어 번역 플로우
+
+async def get_google_rss_news(self, query: str) -> List[Dict]:
+    """
+    1. Google RSS 검색
+       - feedparser로 RSS 파싱
+       - 쿼리 관련 뉴스 필터링
+    
+    2. 자동 번역
+       - Google Translate API 사용
+       - 제목 + 요약 한국어 번역
+       - 원문 링크 유지
+    
+    3. 메타데이터 추가
+       - 발행일, 출처
+       - 번역 여부 표시
+       - 신뢰도 점수
+"""
+```
+
+### 3. 뉴스 통합 및 중복 제거
+
+```python
+async def get_comprehensive_news(self, query: str, use_embedding: bool = True):
+    """
+    통합 전략:
+    
+    1. 매일경제 Neo4j (use_embedding=True)
+       - 임베딩 기반 검색 (3개)
+       - 높은 정확도
+    
+    2. Google RSS (실시간)
+       - 키워드 기반 검색 (5개)
+       - 최신 뉴스
+    
+    3. 중복 제거
+       - URL 기준 중복 체크
+       - 제목 유사도 체크 (>0.9)
+    
+    4. 정렬 및 반환
+       - 관련도 + 최신순
+       - 최대 10개
+"""
 ```
 
 ---
 
-## 🎯 핵심 설계 원칙
+## 🔗 서비스 통합 맵
 
-### 1. Single Source of Truth (SSOT)
-✅ **주식 심볼 매핑**: `utils/stock_utils.py` 통합  
-✅ **데이터 조회**: `rag_service.py` 단일 접점  
-✅ **포맷팅**: `formatters.py` 공용 사용
+### 레이어별 책임
 
-### 2. Separation of Concerns
-✅ **chatbot/**: 메인 서비스, 워크플로우  
-✅ **workflow_components/**: 기능별 독립 서비스  
-✅ **portfolio/**: 포트폴리오 전담  
-✅ **utils/**: 공통 유틸리티
+```
+┌─────────────────────────────────────────────────────────┐
+│ Layer 1: API Layer (FastAPI Router)                    │
+│ - 요청 검증                                              │
+│ - 인증/인가                                              │
+│ - 응답 포맷팅                                            │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│ Layer 2: Service Layer (ChatbotService)                │
+│ - 워크플로우 선택                                        │
+│ - 모니터링                                               │
+│ - 세션 관리                                              │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│ Layer 3: Workflow Layer                                │
+│ ┌─────────────────┬─────────────────────────────────┐  │
+│ │ LangGraph       │ Simplified Intelligent          │  │
+│ │ Enhanced        │ Workflow                        │  │
+│ │ (복잡한 쿼리)    │ (동적 프롬프팅)                  │  │
+│ └─────────────────┴─────────────────────────────────┘  │
+│ ┌─────────────────────────────────────────────────────┐│
+│ │ Financial Workflow (단순한 쿼리)                     ││
+│ └─────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│ Layer 4: Component Layer (Workflow Components)         │
+│ ┌──────────┬──────────┬──────────┬──────────┬────────┐ │
+│ │ Query    │ Financial│ Analysis │ News     │ Visual │ │
+│ │ Classify │ Data     │ Service  │ Service  │ -ize   │ │
+│ └──────────┴──────────┴──────────┴──────────┴────────┘ │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│ Layer 5: Data Layer                                    │
+│ ┌────────────┬────────────┬────────────┬─────────────┐ │
+│ │ ChromaDB   │ Neo4j      │ yfinance   │ Google RSS  │ │
+│ │ (금융지식)  │ (뉴스그래프)│ (주가)     │ (실시간뉴스) │ │
+│ └────────────┴────────────┴────────────┴─────────────┘ │
+└─────────────────────────────────────────────────────────┘
+```
 
-### 3. LangGraph 기반 분기 처리
-✅ **명확한 노드**: 단일 책임 원칙  
-✅ **조건부 엣지**: 동적 라우팅  
-✅ **타입 안전성**: TypedDict 사용
+---
 
-### 4. Fallback 메커니즘
-✅ **LLM 실패** → 키워드 기반 폴백  
-✅ **데이터 없음** → 에러 메시지  
-✅ **빈 응답** → 기본 메시지
+## 💡 실행 흐름 예시
 
-### 5. 사용자 친화적
-✅ **띄어쓰기 무시**: "현대 차" = "현대차"  
-✅ **다양한 표현**: "삼성", "삼전" 모두 인식  
-✅ **명확한 에러**: 구체적인 안내 메시지
+### 예시 1: "삼성전자 주가와 최근 뉴스 알려줘" (복잡한 쿼리)
+
+```
+1. FastAPI Router
+   └─► POST /chat
+
+2. ChatbotService
+   └─► 쿼리 복잡도 판단 → MODERATE (2개 서비스 필요)
+   └─► SimplifiedIntelligentWorkflow 선택
+
+3. QueryComplexityAnalyzer
+   └─► 필요 서비스: ["financial_data", "news"]
+   └─► 복잡도: MODERATE
+
+4. ServicePlanner
+   └─► 실행 계획:
+       - Group 1 (병렬): financial_data, news
+       - Group 2 (순차): response_generation
+
+5. ServiceExecutor (병렬 실행)
+   ├─► Thread 1: FinancialDataService
+   │   └─► yfinance API → 삼성전자 주가 데이터
+   │
+   └─► Thread 2: NewsService
+       ├─► MKRSSScraper (Neo4j)
+       │   └─► 임베딩 검색 → 매일경제 뉴스 3개
+       │
+       └─► Google RSS (실시간)
+           └─► 키워드 검색 + 번역 → 글로벌 뉴스 2개
+
+6. ResultCombiner
+   └─► 주가 데이터 + 뉴스 5개 통합
+
+7. PromptManager
+   └─► 동적 프롬프트 생성:
+       "다음 데이터를 바탕으로 삼성전자의 현재 상황을 분석하세요:
+        주가: 86,000원 (+3.24%)
+        뉴스: [5개 뉴스 요약]
+        사용자 질문: 삼성전자 주가와 최근 뉴스 알려줘"
+
+8. LLM (Gemini 2.0 Flash)
+   └─► 맥락 기반 응답 생성
+
+9. 최종 응답
+   └─► "📊 삼성전자 현재 상황
+        
+        💰 주가 정보:
+        - 현재가: 86,000원
+        - 전일대비: +2,700원 (+3.24%)
+        - 거래량: 23,156,553주
+        
+        📰 최근 뉴스:
+        1. [매일경제] 삼성전자, 3분기 실적 호조 전망
+           (유사도: 0.89, 긍정적)
+        2. [Google] Samsung announces new chip...
+           (번역: 삼성, 신규 칩 발표...)
+        ...
+        
+        💡 종합 분석:
+        긍정적인 뉴스와 함께 주가가 상승세를 보이고 있습니다..."
+
+처리 시간: ~3.2초 (병렬 처리로 단축)
+```
+
+### 예시 2: "PER이 뭐야?" (단순한 쿼리)
+
+```
+1. FastAPI Router
+   └─► POST /chat
+
+2. ChatbotService
+   └─► 쿼리 복잡도 판단 → SIMPLE (1개 서비스)
+   └─► FinancialWorkflow 선택
+
+3. QueryClassifier
+   └─► LLM 분류 → "knowledge"
+
+4. RAG Service (ChromaDB)
+   └─► 벡터 검색 → data/fundamental_analysis.txt
+   └─► 컨텍스트: "PER은 주가수익비율로..."
+
+5. ResponseGenerator
+   └─► 지식 응답 생성
+
+6. 최종 응답
+   └─► "📚 PER(주가수익비율)이란?
+        
+        PER은 주가를 주당순이익으로 나눈 값으로,
+        기업의 가치를 평가하는 지표입니다.
+        
+        💡 해석:
+        - PER < 15: 저평가
+        - PER 15-25: 적정가
+        - PER > 25: 고평가
+        ..."
+
+처리 시간: ~1.5초
+```
+
+---
+
+## ⚡ 성능 최적화
+
+### 1. LLM 호출 최적화
+
+```python
+# 프롬프트 길이 줄이기
+- 불필요한 컨텍스트 제거
+- 핵심 정보만 포함
+- 토큰 수 모니터링
+
+# 캐싱 전략
+- 동일 쿼리 결과 캐싱 (5분)
+- 주가 데이터 캐싱 (1분)
+- 뉴스 데이터 캐싱 (10분)
+```
+
+### 2. 서비스 병렬 처리
+
+```python
+# ThreadPoolExecutor 사용
+with ThreadPoolExecutor(max_workers=5) as executor:
+    futures = {
+        executor.submit(financial_data_service.get_data, query): "data",
+        executor.submit(news_service.get_news, query): "news"
+    }
+    
+    for future in as_completed(futures):
+        service_name = futures[future]
+        results[service_name] = future.result()
+
+# 성능 개선:
+- 순차 실행: 5초 (2.5초 + 2.5초)
+- 병렬 실행: 2.5초 (max(2.5초, 2.5초))
+```
+
+### 3. Neo4j 인덱스 최적화
+
+```cypher
+-- 기사 ID 인덱스
+CREATE INDEX article_id_index FOR (a:Article) ON (a.article_id);
+
+-- 카테고리 인덱스
+CREATE INDEX article_category_index FOR (a:Article) ON (a.category);
+
+-- 발행일 인덱스
+CREATE INDEX article_published_index FOR (a:Article) ON (a.published);
+
+-- 임베딩 벡터 검색 최적화
+CALL gds.alpha.similarity.cosine.stream({
+  nodeProjection: 'Article',
+  relationshipProjection: '*',
+  embeddingProperty: 'embedding'
+})
+```
+
+### 4. 데이터베이스 연결 풀링
+
+```python
+# ChromaDB 연결 재사용
+vectorstore = Chroma(
+    persist_directory="./chroma_db",
+    embedding_function=embeddings,
+    client_settings=Settings(
+        anonymized_telemetry=False,
+        allow_reset=True
+    )
+)
+
+# Neo4j 연결 풀
+graph = Graph(
+    "bolt://localhost:7687",
+    auth=("neo4j", "password"),
+    max_connection_lifetime=3600,
+    max_connection_pool_size=50
+)
+```
 
 ---
 
@@ -905,27 +711,99 @@ workflow_components/
 
 | 항목 | 값 |
 |------|-----|
-| **평균 응답 시간** | 2-3초 |
+| **평균 응답 시간 (단순)** | 1.5-2초 |
+| **평균 응답 시간 (복잡)** | 3-4초 |
+| **병렬 처리 개선율** | ~50% |
 | **LLM 분류 정확도** | ~95% |
-| **폴백 비율** | ~5% |
-| **테스트 성공률** | 100% (22/22) |
-| **지원 종목** | 30+ |
-| **뉴스 소스** | Yahoo Finance RSS |
-| **Vector DB** | ChromaDB |
+| **Neo4j 검색 정확도** | ~90% |
+| **매일경제 뉴스 수집** | 250개/일 |
+| **지원 종목** | 58개 |
+| **임베딩 차원** | 768 (KF-DeBERTa) |
 
 ---
 
 ## 🛠️ 기술 스택
 
+### 핵심 기술
 - **Framework**: FastAPI
 - **LLM**: Google Gemini 2.0 Flash
 - **Workflow**: LangGraph (StateGraph)
-- **Vector DB**: ChromaDB
-- **Embeddings**: HuggingFace Sentence Transformers
-- **Financial Data**: yfinance, Yahoo Finance RSS
+- **Vector DB**: ChromaDB (금융 지식)
+- **Graph DB**: Neo4j (뉴스 지식그래프)
+- **Embeddings**: 
+  - KF-DeBERTa (카카오뱅크 금융 특화)
+  - HuggingFace Sentence Transformers
+- **Financial Data**: yfinance
+- **News Sources**: 
+  - 매일경제 RSS (수동 업데이트)
+  - Google RSS (실시간)
+- **Translation**: Google Translate API
 - **Monitoring**: LangSmith (선택적)
+
+### 주요 라이브러리
+```
+langchain==0.3.27
+langgraph==0.6.7
+langchain-google-genai==2.1.12
+chromadb==1.1.0
+py2neo>=2021.2.4
+sentence-transformers>=2.2.0
+yfinance==0.2.66
+feedparser>=6.0.10
+```
 
 ---
 
-**문서 버전**: 2.0  
-**최종 업데이트**: 2025-10-01
+## 📝 환경 설정
+
+### 필수 환경 변수
+
+```bash
+# API Keys
+GOOGLE_API_KEY=your_google_api_key
+LANGSMITH_API_KEY=your_langsmith_api_key (선택)
+
+# Neo4j 설정
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_password
+
+# ChromaDB 설정
+CHROMA_PERSIST_DIRECTORY=./chroma_db
+
+# 데이터베이스 설정
+DATABASE_URL=sqlite:///./app.db
+```
+
+### Neo4j 설치 및 실행
+
+```bash
+# Docker로 Neo4j 실행
+docker run -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/password \
+  -v $PWD/neo4j/data:/data \
+  neo4j:latest
+
+# 브라우저에서 확인
+http://localhost:7474
+```
+
+### 매일경제 지식그래프 초기화
+
+```bash
+# Python 스크립트 실행
+cd /Users/doyun/Desktop/KEF/BE-LLM
+source venv/bin/activate
+python -c "
+from app.services.workflow_components.mk_rss_scraper import update_mk_knowledge_graph
+import asyncio
+result = asyncio.run(update_mk_knowledge_graph(days_back=7))
+print(result)
+"
+```
+
+---
+
+**문서 버전**: 3.0  
+**최종 업데이트**: 2025-10-05  
+**작성자**: Financial Chatbot Team
