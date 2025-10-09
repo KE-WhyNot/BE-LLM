@@ -5,7 +5,7 @@
 
 from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
-from app.services.workflow_components import financial_data_service, analysis_service, news_service
+from app.services.workflow_components import financial_data_service, news_service
 from app.services.pinecone_rag_service import get_context_for_query
 from app.services.pinecone_config import KNOWLEDGE_NAMESPACES
 

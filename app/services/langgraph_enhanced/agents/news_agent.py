@@ -205,24 +205,37 @@ focus_areas: [값]"""
             response = self.llm.invoke(prompt)
             strategy = self.parse_news_strategy(response.content.strip())
             
+            print(f"🔍 [NewsAgent] 생성된 전략:")
+            print(f"   - search_strategy: {strategy.get('search_strategy')}")
+            print(f"   - search_query: {strategy.get('search_query')}")
+            print(f"   - news_sources: {strategy.get('news_sources')}")
+            
             # 실제 뉴스 수집 (async)
             news_data = []
             mk_context = ""  # 매일경제 컨텍스트는 별도로 저장
             
             try:
                 if strategy['news_sources'] in ['google', 'both']:
+                    print(f"📰 [NewsAgent] Google RSS에서 뉴스 수집 시작: {strategy['search_query']}")
                     # async 함수 직접 호출 - 리스트 반환
                     google_news = await news_service.get_comprehensive_news(
                         query=strategy['search_query']
                     )
                     
+                    print(f"   ✅ [NewsAgent] Google RSS 결과: {len(google_news) if google_news else 0}개")
+                    
                     if google_news and isinstance(google_news, list):
                         news_data.extend(google_news)
                 
                 if strategy['news_sources'] in ['mk', 'both']:
+                    # 매일경제 KG 컨텍스트는 한국어 핵심 키워드 사용
+                    # 예: "금리 뉴스 분석해줘" → "금리"
+                    korean_keyword = self._extract_korean_keyword(user_query)
+                    print(f"   📚 [NewsAgent] 매일경제 KG 검색 키워드: {korean_keyword}")
+                    
                     # async 함수 호출 - 문자열 반환
                     mk_context = await news_service.get_analysis_context_from_kg(
-                        query=strategy['search_query'],
+                        query=korean_keyword,
                         limit=5
                     )
                 
@@ -268,6 +281,24 @@ focus_areas: [값]"""
                 'news_data': [],
                 'analysis_result': "뉴스 수집에 실패했습니다."
             }
+    
+    def _extract_korean_keyword(self, user_query: str) -> str:
+        """한국어 쿼리에서 핵심 키워드 추출
+        
+        예: "삼성전자 뉴스 알려줘" → "삼성전자"
+            "금리 뉴스 분석해줘" → "금리"
+        """
+        # 제거할 불용어
+        stopwords = ['뉴스', '알려줘', '분석', '해줘', '관련', '최신', '오늘', '어제']
+        
+        # 공백으로 분리
+        words = user_query.split()
+        
+        # 불용어 제거
+        keywords = [w for w in words if w not in stopwords]
+        
+        # 키워드가 있으면 첫 번째, 없으면 원본
+        return keywords[0] if keywords else user_query
     
     def _deduplicate_news(self, news_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """뉴스 중복 제거"""

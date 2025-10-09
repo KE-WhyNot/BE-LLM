@@ -6,6 +6,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
 from app.services.workflow_components.data_agent_service import NewsCollector
 from app.services.workflow_components.mk_rss_scraper import MKKnowledgeGraphService, search_mk_news
+from app.services.workflow_components.mk_rss_simple import search_mk_news_simple  # 간단 매일경제 RSS
 from app.services.workflow_components.google_rss_translator import google_rss_translator, search_google_news
 from app.utils.stock_utils import get_company_name_from_symbol
 # prompt_manager는 agents/에서 개별 관리
@@ -260,20 +261,23 @@ class NewsService:
     async def get_analysis_context_from_kg(self, query: str, limit: int = 3) -> str:
         """분석/판단을 위한 매일경제 지식그래프 컨텍스트 생성
         
+        ⚠️ 용도: 뉴스가 아닌, 분석 시 배경 지식 제공 (KG 역할)
+        
         Args:
-            query: 분석 대상 쿼리
+            query: 분석 대상 쿼리 (한국어)
             limit: 참고할 기사 개수
             
         Returns:
             str: LLM에 제공할 컨텍스트 문자열
         """
         try:
-            print(f"📚 분석 컨텍스트 생성: {query}")
+            print(f"📚 매일경제 KG 컨텍스트 검색 (분석용): {query}")
             
-            # 매일경제 지식그래프에서 관련 기사 검색
-            kg_articles = await self.get_mk_news_with_embedding(query, limit=limit)
+            # 매일경제 RSS에서 관련 기사 검색 (간단 버전 - Neo4j GDS 없음)
+            kg_articles = await search_mk_news_simple(query, limit=limit)
             
             if not kg_articles:
+                print(f"⚠️ 매일경제에서 '{query}' 관련 기사 없음")
                 return ""
             
             # 컨텍스트 문자열 생성
@@ -282,15 +286,17 @@ class NewsService:
                 context_parts.append(f"\n[기사 {i}] {article['title']}")
                 if article.get('summary'):
                     context_parts.append(f"요약: {article['summary'][:200]}...")
-                context_parts.append(f"출처: {article['url']}")
-                context_parts.append(f"유사도: {article['similarity_score']:.2f}")
+                context_parts.append(f"출처: {article['link']}")
+                context_parts.append(f"날짜: {article['published']}")
             
             context = "\n".join(context_parts)
-            print(f"✅ 분석 컨텍스트 생성 완료 ({len(kg_articles)}개 기사)")
+            print(f"✅ 매일경제 KG 컨텍스트 생성 완료 ({len(kg_articles)}개 기사)")
             return context
             
         except Exception as e:
-            print(f"❌ 분석 컨텍스트 생성 중 오류: {e}")
+            print(f"❌ 매일경제 KG 컨텍스트 생성 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return ""
     
     def _is_financial_content(self, text: str) -> bool:
@@ -351,23 +357,25 @@ class NewsService:
     async def get_comprehensive_news(self, 
                                     query: str, 
                                     use_google_rss: bool = True,
-                                    translate: bool = True) -> List[Dict[str, Any]]:
-        """✨ 종합 뉴스 검색 (Google RSS 실시간 뉴스 + 기존 RSS 폴백)
+                                    translate: bool = True,
+                                    korean_query: str = None) -> List[Dict[str, Any]]:
+        """✨ 종합 뉴스 검색 (매일경제 RSS + Google RSS)
         
         전략:
-        - 모든 뉴스 요청 → Google RSS 실시간 검색 + 번역
-        - 매일경제 Neo4j → 뉴스가 아닌 분석/판단 시에만 컨텍스트로 사용
+        - 매일경제 RSS (한국어) → korean_query 사용
+        - Google RSS (영어) → query 사용
         
         Args:
-            query: 검색 쿼리
+            query: 검색 쿼리 (영어)
             use_google_rss: Google RSS 실시간 검색 사용 여부
             translate: Google RSS 뉴스 번역 여부
+            korean_query: 한국어 검색 쿼리 (매일경제용)
             
         Returns:
             List[Dict[str, Any]]: 통합된 뉴스 리스트
         """
         try:
-            print(f"📰 실시간 뉴스 검색: {query}")
+            print(f"📰 실시간 뉴스 검색: {query} (한국어: {korean_query})")
             
             all_news = []
             
@@ -375,17 +383,17 @@ class NewsService:
             if query == "오늘 하루 시장 뉴스":
                 return await self.get_today_market_news(limit=10)
             
-            # 1. Google RSS 실시간 뉴스 (번역 포함) - 우선순위 1
+            # 1. Google RSS 실시간 뉴스 (번역 포함) - 뉴스 검색 전용
             if use_google_rss:
-                print("  🌐 Google RSS 실시간 검색 및 번역...")
+                print(f"  🌐 Google RSS 실시간 검색 및 번역: {query}")
                 google_news = await search_google_news(query, limit=5)
                 all_news.extend(google_news)
             
-                # 2. 기존 RSS (Naver, Daum - 폴백용)
-                if len(all_news) < 3:
-                    print("  📡 기존 RSS 검색 (폴백)...")
-                    traditional_news = await self.get_financial_news(query)
-                    all_news.extend(traditional_news[:3])
+            # 2. 기존 RSS (Naver, Daum - 폴백용)
+            if len(all_news) < 3:
+                print("  📡 기존 RSS 검색 (폴백)...")
+                traditional_news = await self.get_financial_news(query)
+                all_news.extend(traditional_news[:3])
             
             # 3. 중복 제거 (URL 기준 + 제목 유사도)
             unique_news = self._remove_duplicates(all_news)

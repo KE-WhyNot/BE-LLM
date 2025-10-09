@@ -1,282 +1,506 @@
-# 📋 남은 작업 목록 (TODO)
+# 📋 배포 전 작업 목록 (TODO)
 
-**최종 업데이트**: 2025-01-05  
-**현재 상태**: 동적 프롬프팅 시스템 통합 완료 ✅
-
----
-
-## 🔴 **우선순위: HIGH (필수)**
-
-### 1. 뉴스 웹스크래핑 구현
-**현재 상태**: 더미 데이터 사용 중  
-**목표**: 실제 한국 뉴스 사이트에서 금융 뉴스 수집
-
-#### 작업 내용
-- [ ] `app/services/workflow_components/news_scraper.py` 생성
-  - Naver 뉴스 스크래핑
-  - Daum 뉴스 스크래핑
-  - 연합뉴스 스크래핑
-  - 금융 키워드 필터링
-  
-- [ ] `data_agent_service.py` 개선
-  - RSS 피드 실패 시 웹 스크래핑으로 대체
-  - 더미 데이터 생성 로직 제거 또는 최후의 fallback으로 변경
-  
-- [ ] `news_service.py` 통합
-  - 실제 스크래핑된 뉴스 사용
-  - 뉴스 캐싱 추가 (중복 요청 방지)
-
-#### 예상 시간: 2-3시간
-
-#### 참고 코드
-```python
-# 기본 구조 예시
-class RealNewsCollector:
-    def scrape_naver_news(self, query: str, limit: int = 10):
-        # BeautifulSoup으로 Naver 뉴스 스크래핑
-        pass
-    
-    def scrape_daum_news(self, query: str, limit: int = 10):
-        # BeautifulSoup으로 Daum 뉴스 스크래핑
-        pass
-```
+**최종 업데이트**: 2025-10-09  
+**현재 브랜치**: PRJ-85-feature-chatbot-news-search  
+**현재 상태**: 메타 에이전트 시스템 + 뉴스 검색 기능 완료 ✅
 
 ---
 
-## 🟡 **우선순위: MEDIUM (중요)**
+## 🔴 **우선순위: CRITICAL (배포 전 필수)**
 
-### 2. Neo4j 지식 그래프 연동
-**현재 상태**: py2neo 미설치, 연결 실패  
-**목표**: KF-DeBERTa로 추출한 관계를 Neo4j에 저장
+### 1. ✅ 뉴스 검색 기능 async 처리 완료
+**현재 상태**: 완료  
+**완료 내용**:
+- `NewsAgent.process()` async 처리 완료
+- `workflow_router.py`에서 ThreadPoolExecutor로 async 함수 실행
+- Google RSS 실시간 뉴스 수집 및 번역 정상 작동
+- 테스트 완료: "삼성전자 뉴스 분석해줘" → 정상 응답
+
+#### 관련 파일
+- ✅ `app/services/langgraph_enhanced/agents/news_agent.py`
+- ✅ `app/services/langgraph_enhanced/workflow_router.py`
+- ✅ `app/services/workflow_components/news_service.py`
+- ✅ `app/services/workflow_components/google_rss_translator.py`
+
+---
+
+### 2. 환경 변수 및 민감 정보 관리
+**현재 상태**: ⚠️ 진행 중  
+**목표**: 프로덕션 배포를 위한 보안 강화
 
 #### 작업 내용
-- [ ] Neo4j 설치 및 실행
-  ```bash
-  brew install neo4j
-  neo4j start
-  ```
 
-- [ ] py2neo 설치
-  ```bash
-  pip install py2neo
-  ```
-
-- [ ] 환경변수 설정
-  ```bash
+**2.1. 필수 환경 변수 확인 및 문서화**
+- [ ] `.env.example` 파일 생성
+  ```env
+  # API Keys (필수)
+  GOOGLE_API_KEY=your_google_api_key_here
+  
+  # LangSmith 설정 (선택)
+  LANGCHAIN_TRACING_V2=true
+  LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
+  LANGCHAIN_API_KEY=your_langsmith_api_key_here
+  LANGCHAIN_PROJECT=financial-chatbot
+  
+  # Neo4j 설정 (필수)
   NEO4J_URI=bolt://localhost:7687
   NEO4J_USER=neo4j
-  NEO4J_PASSWORD=your_password
+  NEO4J_PASSWORD=your_neo4j_password
+  
+  # Pinecone 설정 (필수)
+  PINECONE_API_KEY=your_pinecone_api_key_here
+  PINECONE_INDEX_NAME=finance-rag-index
+  EMBEDDING_MODEL_NAME=kakaobank/kf-deberta-base
+  BATCH_SIZE=32
+  MAX_LENGTH=256
+  TOP_K=20
+  
+  # 데이터베이스 (선택)
+  DATABASE_URL=mysql+pymysql://user:password@localhost/db_name
+  
+  # 벡터 데이터베이스 (선택)
+  CHROMA_PERSIST_DIRECTORY=./chroma_db
+  
+  # 서버 설정
+  ENVIRONMENT=production
+  DEBUG=false
   ```
 
-- [ ] `data_agent_service.py` 테스트
-  - 뉴스 수집 → 관계 추출 → Neo4j 저장 전체 파이프라인 확인
+**2.2. .gitignore 검증**
+- [x] `.env` 파일이 gitignore에 포함되어 있는지 확인 (완료)
+- [ ] 민감한 로그 파일 제외 확인
+  - `server.log`
+  - `*.log`
+  - `.env*`
+
+**2.3. 환경 변수 검증 로직 추가**
+- [ ] `config.py`에 필수 환경 변수 검증 추가
+  ```python
+  def validate_env_vars():
+      required_vars = [
+          "GOOGLE_API_KEY",
+          "NEO4J_URI",
+          "PINECONE_API_KEY"
+      ]
+      missing = [var for var in required_vars if not getattr(settings, var.lower(), None)]
+      if missing:
+          raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+  ```
+
+**2.4. 프로덕션 환경 설정**
+- [ ] CORS 설정 강화 (`main.py`)
+  ```python
+  # 현재: allow_origins=["*"]  ← 개발용
+  # 변경: allow_origins=["https://yourdomain.com"]  ← 프로덕션용
+  ```
+
+#### 예상 시간: 1시간
+
+---
+
+### 3. Neo4j 연결 안정성 개선
+**현재 상태**: ⚠️ 오류 발생 중  
+**문제**: GDS 함수 미지원으로 매일경제 뉴스 임베딩 검색 실패
+
+#### 오류 로그
+```
+Statement.SyntaxError: Unknown function 'gds.similarity.cosine'
+```
+
+#### 작업 내용
+- [ ] **Option 1**: Neo4j GDS 플러그인 설치
+  ```bash
+  # Neo4j Desktop에서 GDS 플러그인 설치
+  # 또는 Docker 이미지 사용
+  docker pull neo4j/neo4j-gds
+  ```
+
+- [ ] **Option 2**: 임베딩 검색 로직 변경
+  - `mk_rss_scraper.py`의 `search_news()` 메서드 수정
+  - 순수 Python 코사인 유사도 계산으로 변경
+  ```python
+  from sklearn.metrics.pairwise import cosine_similarity
+  # Neo4j GDS 대신 scikit-learn 사용
+  ```
+
+- [ ] **Option 3**: Neo4j 의존성 제거 (권장)
+  - 매일경제 뉴스를 Pinecone으로 이전
+  - `mk_rss_scraper.py`의 Neo4j 코드 제거
+  - Google RSS만 사용 (현재 정상 작동 중)
+
+#### 우선순위: 🟡 MEDIUM (Google RSS로 대체 가능)
+#### 예상 시간: 2-3시간
+
+---
+
+### 4. requirements.txt 정리
+**현재 상태**: ⚠️ 중복 및 미사용 패키지 존재
+
+#### 작업 내용
+- [ ] 중복 패키지 제거
+  ```txt
+  # 중복 발견
+  sentence-transformers==5.1.0  # 라인 130
+  sentence-transformers>=2.2.0  # 라인 171
+  ```
+
+- [ ] 미사용 패키지 확인 및 제거
+  - `py2neo` (Neo4j 사용하지 않을 경우)
+  - `openai` (Gemini만 사용)
+  - `faiss-cpu` (Pinecone만 사용)
+
+- [ ] 패키지 버전 고정
+  ```bash
+  pip freeze > requirements_frozen.txt
+  # 프로덕션에서는 정확한 버전 사용
+  ```
+
+- [ ] `nest_asyncio` 추가 (뉴스 async 처리용)
+  ```txt
+  nest-asyncio==1.6.0
+  ```
+
+#### 예상 시간: 30분
+
+---
+
+## 🟡 **우선순위: HIGH (배포 전 권장)**
+
+### 5. 코드 정리 (클린업)
+**현재 상태**: ✅ 일부 완료  
+**완료 내용**:
+- ✅ `financial_workflow.py` - 레거시 워크플로우 로직 제거 (400줄 삭제)
+- ✅ `response_generator_service.py` - 미사용 메서드 제거 (800줄 삭제)
+
+#### 남은 작업
+- [ ] 테스트 파일 정리
+  ```
+  tests/legacy/  ← 삭제 또는 아카이브
+    - auto_news_test.py
+    - news_analysis_test.py
+    - simple_test.py
+  
+  tests/  ← 정리 필요
+    - test_embedding_neo4j.py  # Neo4j 미사용 시 삭제
+    - test_mk_rss_scraper.py  # Neo4j 미사용 시 삭제
+    - test_rss_simple.py  # 중복
+  ```
+
+- [ ] 루트 디렉토리 테스트 파일 이동/삭제
+  ```
+  /test_analysis_integrated.py  → tests/
+  /test_namespace_classification.py  → tests/
+  /test_namespace_data.py  → tests/
+  ```
+
+- [ ] 문서 정리
+  ```
+  docs/IMPLEMENTATION_SUMMARY.md  # 삭제 (구버전)
+  docs/TEST_GUIDE.md  # 업데이트 필요
+  ```
+
+- [ ] 디버그 로그 제거
+  - `print()` 문을 `logger.debug()`로 변경
+  - 프로덕션에서 불필요한 출력 제거
 
 #### 예상 시간: 1-2시간
 
 ---
 
-### 3. 사용자 프로필 DB 연동
-**현재 상태**: 모의 데이터 (`user_service.py`)  
-**목표**: 실제 DB 또는 외부 API에서 사용자 정보 가져오기
+### 6. 에러 처리 강화
+**현재 상태**: 기본 에러 처리만 존재
 
 #### 작업 내용
-- [ ] `user_service.py` 개선
-  - 실제 DB 연결 (PostgreSQL/MySQL)
-  - 또는 외부 API 연동
+- [ ] API 레이트 리밋 처리
+  ```python
+  # Google API, Pinecone API 호출 시 재시도 로직
+  from tenacity import retry, stop_after_attempt, wait_exponential
   
-- [ ] 사용자 프로필 필드 확장
-  - 투자 성향 (공격형/안정형)
-  - 보유 포트폴리오
-  - 관심 종목
-  - 투자 경험 레벨
-  
-- [ ] 동적 프롬프팅 연동
-  - `prompt_manager`에 사용자 프로필 전달
-  - 맞춤형 분석 제공
+  @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+  def call_external_api():
+      pass
+  ```
 
-#### 예상 시간: 2-3시간
+- [ ] 타임아웃 설정
+  ```python
+  # news_agent.py의 뉴스 수집 타임아웃
+  future.result(timeout=60)  # 이미 구현됨, 다른 곳도 확인 필요
+  ```
+
+- [ ] 에러 메시지 개선
+  - 사용자에게 친절한 에러 메시지
+  - 로그에는 상세한 스택 트레이스
+
+- [ ] Fallback 전략 명확화
+  ```python
+  # WorkflowRouter 초기화 실패 시
+  # 현재: "시스템을 사용할 수 없습니다" ← 너무 간단
+  # 개선: 구체적인 원인과 해결 방법 제시
+  ```
+
+#### 예상 시간: 2시간
 
 ---
 
-## 🟢 **우선순위: LOW (선택 사항)**
-
-### 4. 실시간 주식 데이터 업데이트
-**현재 상태**: yfinance API 사용 (지연 데이터)  
-**목표**: 실시간 또는 준실시간 주식 데이터
+### 7. 성능 최적화
+**현재 상태**: 기본 구현
 
 #### 작업 내용
-- [ ] 실시간 데이터 소스 조사
-  - 한국투자증권 API
-  - 키움증권 API
-  - 네이버 금융 API
-  
-- [ ] `financial_data_service.py` 개선
-  - 실시간 데이터 연동
-  - 캐싱 전략 (불필요한 API 호출 방지)
+- [ ] LLM 응답 스트리밍
+  ```python
+  # ResponseAgent에서 스트리밍 응답 지원
+  for chunk in llm.stream(prompt):
+      yield chunk
+  ```
 
-#### 예상 시간: 3-4시간
-
----
-
-### 5. 차트 생성 최적화
-**현재 상태**: matplotlib으로 기본 차트 생성  
-**목표**: 더 빠르고 예쁜 차트
-
-#### 작업 내용
-- [ ] 차트 캐싱
-  - 동일 종목/기간 요청 시 캐시 사용
-  
-- [ ] 차트 스타일 개선
-  - 전문적인 차트 템플릿
-  - 한국어 폰트 최적화
-  
-- [ ] 차트 종류 확장
-  - 볼린저 밴드
-  - MACD
-  - RSI
-
-#### 예상 시간: 2-3시간
-
----
-
-### 6. 성능 최적화
-**현재 상태**: 기본 구현  
-**목표**: 응답 시간 단축
-
-#### 작업 내용
-- [x] LLM 호출 최적화
-  - 프롬프트 길이 줄이기 (PromptManager 구현)
-  - 불필요한 LLM 호출 제거 (캐싱 전략)
-  
-- [x] 서비스 병렬 처리
-  - 데이터 조회 + 뉴스 조회 동시 실행 (ServiceExecutor 구현)
-  - ThreadPoolExecutor 사용
-
-## 완료된 작업 (2025-01-05)
-
-### 1. LangGraph 동적 프롬프팅 시스템 구축 ✅
-- SimplifiedIntelligentWorkflow 구현
-- QueryComplexityAnalyzer: 쿼리 복잡도 분석
-- ServicePlanner: 서비스 실행 계획 수립
-- ServiceExecutor: 병렬 서비스 실행
-- ResultCombiner: 결과 조합
-- ConfidenceCalculator: 신뢰도 계산
-- PromptManager: 동적 프롬프트 생성
-
-### 2. Neo4j 지식그래프 RAG 시스템 구축 ✅
-- 매일경제 RSS 피드 스크래퍼 (mk_rss_scraper.py)
-- KF-DeBERTa 임베딩 (카카오뱅크 금융 특화 모델)
-- Neo4j 노드 및 관계 생성
-- 코사인 유사도 기반 검색
-- 수동 업데이트 시스템
-
-### 3. Google RSS 실시간 뉴스 번역 시스템 구축 ✅
-- google_rss_translator.py 구현
-- deep-translator 라이브러리 사용
-- 영어 → 한국어 자동 번역
-- 실시간 뉴스 검색
-
-### 4. 통합 뉴스 서비스 구축 ✅
-- news_service.py 업데이트
-- 3가지 뉴스 소스 통합:
-  1. 매일경제 Neo4j RAG (수동 업데이트)
-  2. Google RSS (실시간 + 번역)
-  3. 기존 RSS (폴백)
-- 중복 제거 (URL + 제목 유사도)
-- 관련도 + 최신순 정렬
-
-### 5. 클린코드 6원칙 준수 ✅
-- 단일 책임 원칙 (SRP)
-- 개방-폐쇄 원칙 (OCP)
-- 리스코프 치환 원칙 (LSP)
-- 인터페이스 분리 원칙 (ISP)
-- 의존성 역전 원칙 (DIP)
-- DRY 원칙
-
-### 6. ARCHITECTURE.md 업데이트 ✅
-- 전체 시스템 아키텍처 문서화
-- 클린코드 원칙 설명
-- LangGraph 동적 프롬프팅 플로우
-- Neo4j RAG 시스템 구조
-- 뉴스 처리 플로우
-- 성능 최적화 전략
-  
 - [ ] 캐싱 전략
-  - Redis 도입
-  - 자주 조회되는 종목 캐싱
+  ```python
+  # 주가 데이터 캐싱 (5분)
+  @lru_cache(maxsize=100)
+  def get_stock_price(symbol: str, cache_time: int = 300):
+      pass
+  ```
+
+- [ ] Pinecone 배치 검색 최적화
+  - 현재 top_k=20 → 필요한 경우만 높은 값 사용
+  - 쿼리 임베딩 캐싱
+
+- [ ] 병렬 처리 개선
+  - `ParallelExecutor` 성능 모니터링
+  - 불필요한 에이전트 실행 방지
+
+#### 예상 시간: 3시간
+
+---
+
+## 🟢 **우선순위: MEDIUM (선택 사항)**
+
+### 8. 테스트 커버리지 개선
+**현재 상태**: 통합 테스트 부족
+
+#### 작업 내용
+- [ ] 단위 테스트 추가
+  ```python
+  # tests/test_news_agent.py
+  def test_news_agent_async():
+      agent = NewsAgent()
+      result = asyncio.run(agent.process("삼성전자 뉴스", {...}))
+      assert result['success'] == True
+      assert len(result['news_data']) > 0
+  ```
+
+- [ ] E2E 테스트 추가
+  ```python
+  # tests/test_e2e_workflow.py
+  def test_complete_workflow():
+      response = client.post("/api/v1/chat", json={...})
+      assert response.status_code == 200
+  ```
+
+- [ ] 성능 테스트
+  ```bash
+  python tests/performance_test/simple_benchmark.py
+  ```
 
 #### 예상 시간: 3-4시간
 
 ---
 
-## 🧪 **테스트 관련**
+### 9. 모니터링 및 로깅 개선
+**현재 상태**: LangSmith 트레이싱 활성화됨
 
-### 7. 통합 테스트 추가
-- [ ] API 엔드포인트 테스트
-- [ ] 동적 프롬프팅 E2E 테스트
-- [ ] 워크플로우 분기 테스트
-- [ ] 에러 처리 테스트
+#### 작업 내용
+- [ ] 구조화된 로깅
+  ```python
+  import structlog
+  logger = structlog.get_logger()
+  logger.info("request_processed", user_id=1, query="...", duration_ms=123)
+  ```
 
-#### 예상 시간: 2-3시간
+- [ ] 메트릭 수집
+  - 응답 시간
+  - 에러율
+  - API 호출 횟수
 
----
+- [ ] 알림 설정
+  - 에러율 5% 이상 시 알림
+  - 응답 시간 10초 이상 시 알림
 
-### 8. LangSmith 모니터링 개선
-- [ ] 커스텀 메트릭 추가
-- [ ] 프롬프트 버전 관리
-- [ ] A/B 테스트 설정
-
-#### 예상 시간: 1-2시간
-
----
-
-## 📚 **문서화**
-
-### 9. 사용자 가이드 작성
-- [ ] API 사용 가이드
-- [ ] 동적 프롬프팅 가이드
-- [ ] 배포 가이드
-- [ ] 트러블슈팅 가이드
-
-#### 예상 시간: 2-3시간
+#### 예상 시간: 2시간
 
 ---
 
-## 🎯 **다음 Sprint 추천 순서**
+### 10. 문서화 업데이트
+**현재 상태**: 기본 문서 존재, 업데이트 필요
 
-1. **뉴스 웹스크래핑** (2-3시간) - 가장 즉시 가치 제공
-2. **Neo4j 연동** (1-2시간) - 지식 그래프 완성
-3. **사용자 프로필 DB 연동** (2-3시간) - 맞춤형 서비스 제공
-4. **성능 최적화** (3-4시간) - 사용자 경험 개선
-5. **통합 테스트** (2-3시간) - 안정성 확보
+#### 작업 내용
+- [ ] README.md 업데이트
+  - 뉴스 검색 기능 추가 설명
+  - 메타 에이전트 시스템 설명
+  - 최신 API 예시
 
-**총 예상 시간**: 10-15시간
+- [ ] API 문서 자동 생성
+  ```python
+  # FastAPI Swagger UI 개선
+  @app.post("/api/v1/chat", summary="채팅 요청", description="...")
+  ```
+
+- [ ] 배포 가이드 작성
+  - Docker 배포
+  - 환경 변수 설정
+  - 트러블슈팅
+
+#### 예상 시간: 2시간
 
 ---
 
-## ✅ **완료된 작업**
+## 🟢 **우선순위: LOW (향후 개선)**
 
-- ✅ 동적 프롬프팅 시스템 구현
-- ✅ Prompt Manager를 모든 서비스에 통합
-- ✅ 순환 import 문제 해결
-- ✅ LangGraph Enhanced 시스템 정리
-- ✅ Gemini 2.0 Flash 전용 시스템
-- ✅ Chat Terminal 개선
-- ✅ 배포 체크리스트 작성
-- ✅ Data-Agent 문서화
-- ✅ 서버 안정화
+### 11. 사용자 프로필 기반 맞춤형 응답
+**현재 상태**: 모의 데이터만 사용
+
+#### 작업 내용
+- [ ] 실제 DB 연동
+- [ ] 사용자 투자 성향 분석
+- [ ] 맞춤형 프롬프트 생성
+
+#### 예상 시간: 3-4시간
+
+---
+
+### 12. 실시간 주식 데이터
+**현재 상태**: yfinance (지연 데이터)
+
+#### 작업 내용
+- [ ] 한국투자증권 API 연동
+- [ ] WebSocket 실시간 데이터
+
+#### 예상 시간: 4-5시간
+
+---
+
+## 📊 **작업 우선순위 및 예상 시간**
+
+| 우선순위 | 작업 | 예상 시간 | 상태 |
+|---------|------|----------|------|
+| 🔴 CRITICAL | 1. 뉴스 검색 async 처리 | 2시간 | ✅ 완료 |
+| 🔴 CRITICAL | 2. 환경 변수 관리 | 1시간 | ⏳ 진행 중 |
+| 🟡 CRITICAL | 3. Neo4j 안정성 | 2-3시간 | ⏳ 대기 |
+| 🔴 CRITICAL | 4. requirements.txt 정리 | 30분 | ⏳ 대기 |
+| 🟡 HIGH | 5. 코드 정리 | 1-2시간 | 🔄 일부 완료 |
+| 🟡 HIGH | 6. 에러 처리 강화 | 2시간 | ⏳ 대기 |
+| 🟡 HIGH | 7. 성능 최적화 | 3시간 | ⏳ 대기 |
+| 🟢 MEDIUM | 8. 테스트 커버리지 | 3-4시간 | ⏳ 대기 |
+| 🟢 MEDIUM | 9. 모니터링 개선 | 2시간 | ⏳ 대기 |
+| 🟢 MEDIUM | 10. 문서화 업데이트 | 2시간 | ⏳ 대기 |
+| 🟢 LOW | 11. 사용자 프로필 | 3-4시간 | 📅 향후 |
+| 🟢 LOW | 12. 실시간 주식 데이터 | 4-5시간 | 📅 향후 |
+
+**배포 전 필수 작업 시간**: 5.5 - 7.5시간  
+**권장 작업 포함 시간**: 13.5 - 19.5시간  
+**전체 작업 시간**: 30+ 시간
+
+---
+
+## 🎯 **배포 완료 기준**
+
+### **필수 (Must Have) - 배포 전 반드시 완료**
+- [x] 뉴스 검색 기능 정상 작동
+- [ ] 환경 변수 검증 및 .env.example 파일 생성
+- [ ] CORS 설정 프로덕션 환경으로 변경
+- [ ] requirements.txt 정리 및 버전 고정
+- [ ] 민감 정보 gitignore 확인
+- [ ] 기본 에러 처리 및 fallback 전략
+- [ ] 프로덕션 환경 테스트 1회 이상
+
+### **권장 (Should Have) - 배포 후 빠르게 추가**
+- [ ] 구조화된 로깅
+- [ ] API 레이트 리밋 처리
+- [ ] 테스트 커버리지 50% 이상
+- [ ] README.md 최신화
+- [ ] Neo4j GDS 오류 해결 또는 대체
+
+### **선택 (Nice to Have) - 향후 개선**
+- [ ] 성능 모니터링 대시보드
+- [ ] 사용자 프로필 맞춤형 응답
+- [ ] 실시간 주식 데이터
+- [ ] Docker 배포 자동화
+
+---
+
+## 🚨 **현재 즉시 해결 필요한 이슈**
+
+### 1. **nest_asyncio 설치 완료**
+**상태**: ✅ 해결됨  
+**해결 방법**: `pip install nest-asyncio==1.6.0`
+
+### 2. **Neo4j GDS 함수 오류**
+**상태**: ⚠️ 진행 중  
+**오류**: `Unknown function 'gds.similarity.cosine'`  
+**임시 해결**: Google RSS로 뉴스 수집 (정상 작동)  
+**장기 해결**: Option 3 권장 (Pinecone으로 통합)
+
+### 3. **프로덕션 CORS 설정**
+**상태**: ⚠️ 개발용 설정  
+**현재**: `allow_origins=["*"]`  
+**변경 필요**: `allow_origins=["https://yourdomain.com"]`
+
+---
+
+## 📝 **다음 커밋 예정**
+
+```bash
+# 1. 뉴스 검색 완료 커밋
+git add app/services/langgraph_enhanced/agents/news_agent.py
+git add app/services/langgraph_enhanced/workflow_router.py
+git commit -m "feat: 뉴스 검색 async 처리 완료 및 Google RSS 통합
+
+- NewsAgent.process()를 async로 변경
+- workflow_router에서 ThreadPoolExecutor로 async 함수 실행
+- Google RSS 실시간 뉴스 수집 및 자동 번역
+- nest_asyncio 패키지 추가
+- 테스트 완료: 삼성전자 뉴스 분석 정상 작동
+
+Related: PRJ-85-feature-chatbot-news-search"
+
+# 2. 코드 정리 커밋 (이미 완료됨, 커밋 대기 중)
+git add app/services/chatbot/financial_workflow.py
+git add app/services/workflow_components/response_generator_service.py
+git commit -m "refactor: 레거시 워크플로우 및 미사용 코드 제거
+
+- financial_workflow.py: 레거시 워크플로우 로직 제거 (400줄)
+- response_generator_service.py: 미사용 메서드 제거 (800줄)
+- 메타 에이전트 시스템만 유지
+- 코드베이스 간소화 및 유지보수성 향상
+
+Related: PRJ-85-feature-chatbot-news-search"
+
+# 3. 환경 변수 및 보안 강화 커밋 (작업 예정)
+git add .env.example
+git add app/config.py
+git add app/main.py
+git commit -m "feat: 프로덕션 배포를 위한 보안 및 환경 변수 관리 강화
+
+- .env.example 파일 추가
+- 필수 환경 변수 검증 로직 추가
+- CORS 설정 프로덕션 환경으로 변경
+- requirements.txt 정리 및 버전 고정
+
+Related: PRJ-85-feature-chatbot-news-search"
+```
 
 ---
 
 ## 📞 **문의 및 이슈**
 
 이슈가 발생하거나 질문이 있으면:
-1. `DEPLOYMENT_CHECKLIST.md` 확인
-2. `ARCHITECTURE.md` 참고
-3. `DATA_AGENT_README.md` 참고
+1. `CODEBASE_ANALYSIS_REPORT.md` 확인
+2. `docs/DEPLOYMENT_CHECKLIST.md` 확인
+3. `ARCHITECTURE.md` 참고
 4. Git 이슈 등록
 
 ---
 
-**마지막 커밋**: feat: 동적 프롬프팅 시스템 완전 통합 및 시스템 안정화 (40a4a0c2)
-
+**마지막 업데이트**: 2025-10-09  
+**작성자**: AI Assistant  
+**다음 리뷰 일정**: 배포 전 최종 검토

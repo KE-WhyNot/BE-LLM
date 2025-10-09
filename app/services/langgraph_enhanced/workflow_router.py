@@ -491,31 +491,39 @@ class WorkflowRouter:
         return state
     
     def _news_agent_node(self, state: WorkflowState) -> WorkflowState:
-        """뉴스 에이전트 노드 (async 처리)"""
+        """뉴스 에이전트 노드 (async 처리 - sync wrapper)"""
         def handle_success(s, r):
             s["news_data"] = r['news_data']
             s["news_analysis"] = r['analysis_result']
             print(f"📰 뉴스 수집 및 분석 완료: {len(r['news_data'])}건")
         
-        # NewsAgent가 async이므로 asyncio로 실행
+        # NewsAgent가 async이므로 동기적으로 실행
         try:
             import asyncio
             agent = self.agents["news_agent"]
             
-            # 새 이벤트 루프에서 실행
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # 현재 이벤트 루프가 실행 중인지 확인
             try:
-                result = loop.run_until_complete(
+                loop = asyncio.get_running_loop()
+                # 이미 루프가 실행 중이면 run_until_complete 사용 불가
+                # 대신 동기 방식으로 처리
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        asyncio.run,
+                        agent.process(state["user_query"], state["query_analysis"])
+                    )
+                    result = future.result(timeout=60)  # 60초 타임아웃
+            except RuntimeError:
+                # 루프가 실행 중이지 않으면 새로 만들어서 실행
+                result = asyncio.run(
                     agent.process(state["user_query"], state["query_analysis"])
                 )
                 
-                if result['success']:
-                    handle_success(state, result)
-                else:
-                    state["error"] = result.get('error', 'news_agent 실패')
-            finally:
-                loop.close()
+            if result['success']:
+                handle_success(state, result)
+            else:
+                state["error"] = result.get('error', 'news_agent 실패')
                 
         except Exception as e:
             print(f"❌ news_agent 오류: {e}")
