@@ -120,6 +120,7 @@ class WorkflowRouter:
             "data_agent",
             self._route_after_data,
             {
+                "analysis_agent": "analysis_agent",  # ← 투자 질문 시 analysis_agent로!
                 "response_agent": "response_agent",
                 "result_combiner": "result_combiner",
                 "end": END
@@ -338,9 +339,13 @@ class WorkflowRouter:
             
             # 분석 에이전트 결과
             if state.get('analysis_result'):
+                news_data_in_state = state.get('news_data', [])
+                print(f"🔍 analysis_agent 결과 생성: news_data={len(news_data_in_state)}개")
                 agent_results['analysis_agent'] = {
                     'success': True,
-                    'analysis_result': state['analysis_result']
+                    'analysis_result': state['analysis_result'],
+                    # analysis_agent가 수집한 뉴스도 포함 ✨
+                    'news_data': news_data_in_state
                 }
             
             # 뉴스 에이전트 결과
@@ -460,27 +465,41 @@ class WorkflowRouter:
         """분석 에이전트 노드 (async 처리 - RAG + 뉴스 통합)"""
         try:
             import asyncio
+            import concurrent.futures
+            
             agent = self.agents["analysis_agent"]
             
-            # 새 이벤트 루프에서 실행
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(
-                    agent.process(state["user_query"], state["query_analysis"])
-                )
-                
-                if result['success']:
-                    state["analysis_result"] = result['analysis_result']
-                    if result.get('financial_data'):
-                        state["financial_data"] = result['financial_data']
-                    print(f"📈 통합 투자 분석 완료: {result.get('stock_symbol', '일반')}")
-                    print(f"   - RAG 컨텍스트: {result.get('rag_context_length', 0)} 글자")
-                    print(f"   - 뉴스: {result.get('news_count', 0)}건")
+            # 동기 함수에서 비동기 함수 실행
+            # 이미 실행 중인 이벤트 루프가 있으므로 새 스레드에서 실행
+            def run_async_in_thread():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(
+                        agent.process(state["user_query"], state["query_analysis"])
+                    )
+                finally:
+                    new_loop.close()
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_async_in_thread)
+                result = future.result(timeout=60)  # 60초 타임아웃
+            
+            if result['success']:
+                state["analysis_result"] = result['analysis_result']
+                if result.get('financial_data'):
+                    state["financial_data"] = result['financial_data']
+                # 뉴스 데이터 저장 ✨
+                if result.get('news_data'):
+                    state["news_data"] = result['news_data']
+                    print(f"🔍 _analysis_agent_node: news_data 저장 → {len(result['news_data'])}개")
                 else:
-                    state["error"] = result.get('error', 'analysis_agent 실패')
-            finally:
-                loop.close()
+                    print(f"🔍 _analysis_agent_node: result에 news_data 없음")
+                print(f"📈 통합 투자 분석 완료: {result.get('stock_symbol', '일반')}")
+                print(f"   - RAG 컨텍스트: {result.get('rag_context_length', 0)} 글자")
+                print(f"   - 뉴스: {result.get('news_count', 0)}건")
+            else:
+                state["error"] = result.get('error', 'analysis_agent 실패')
                 
         except Exception as e:
             print(f"❌ analysis_agent 오류: {e}")
@@ -646,12 +665,23 @@ class WorkflowRouter:
         return state.get("next_agent", "response_agent")
     
     def _route_after_data(self, state: WorkflowState) -> str:
-        """데이터 에이전트 후 라우팅"""
+        """데이터 에이전트 후 라우팅 (투자 질문 감지)"""
         service_plan = state.get("service_plan", {})
         execution_mode = service_plan.get("execution_mode", "single")
+        query_analysis = state.get("query_analysis", {})
         
-        # 간단한 주가 요청이고 이미 응답이 생성된 경우 바로 종료
+        # 💡 투자 질문 감지 (최우선 체크!)
+        is_investment_question = query_analysis.get('is_investment_question', False)
+        
+        if is_investment_question:
+            # 투자 질문이면 무조건 analysis_agent로!
+            print(f"💡 투자 질문 감지! 심층 분석을 위해 analysis_agent로 라우팅")
+            state['final_response'] = None  # 혹시 설정되었다면 리셋
+            return "analysis_agent"
+        
+        # 간단한 주가 요청이고 이미 응답이 생성된 경우
         if state.get("final_response"):
+            # 투자 질문 아니면 그대로 종료
             return "end"
         
         # 병렬 실행 모드였다면 결과 통합으로
@@ -688,6 +718,43 @@ class WorkflowRouter:
             # 워크플로우 실행
             result = self.workflow.invoke(initial_state)
             
+            # 디버그: result 타입 확인
+            print(f"\n🔍 workflow.invoke 결과 타입: {type(result)}")
+            print(f"🔍 result 키: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+            if isinstance(result, dict):
+                print(f"🔍 final_response: '{result.get('final_response', 'NONE')[:100]}'")
+                print(f"🔍 combined_result 있음: {bool(result.get('combined_result'))}")
+            
+            # 응답 형식 변환
+            return {
+                "success": "error" not in result or not result.get("error"),
+                "reply_text": result.get("final_response", ""),
+                "action_type": "intelligent_agent_system",
+                "action_data": {
+                    "query_analysis": result.get("query_analysis", {}),
+                    "service_plan": result.get("service_plan", {}),
+                    "confidence_evaluation": result.get("confidence_evaluation", {}),
+                    "agent_history": result.get("agent_history", []),
+                    "timestamp": datetime.now().isoformat(),
+                    "user_id": user_id,
+                    "workflow_type": "meta_agent_enhanced"
+                },
+                "chart_image": result.get("chart_data", {}).get("chart_base64") if result.get("chart_data") else None
+            }
+            
+        except Exception as e:
+            print(f"❌ 워크플로우 실행 오류: {e}")
+            return {
+                "success": False,
+                "reply_text": f"시스템 오류가 발생했습니다: {str(e)}",
+                "action_type": "error",
+                "action_data": {
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat(),
+                    "user_id": user_id
+                }
+            }
+
             # 응답 형식 변환
             return {
                 "success": "error" not in result or not result.get("error"),

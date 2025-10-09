@@ -6,6 +6,7 @@
 from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
 from app.services.workflow_components import financial_data_service, visualization_service
+from app.utils.stock_utils import extract_symbol_from_query
 
 
 class VisualizationAgent(BaseAgent):
@@ -228,8 +229,10 @@ include_analysis: [값]"""
             response = self.llm.invoke(prompt)
             strategy = self.parse_visualization_strategy(response.content.strip())
             
-            # 주식 심볼 추출
-            stock_symbol = self._extract_stock_symbol(user_query)
+            # 주식 심볼 추출 (stock_utils 사용 - 한국/미국 주식 모두 지원)
+            stock_symbol = extract_symbol_from_query(user_query)
+            
+            self.log(f"추출된 심볼: {stock_symbol}")
             
             # 차트 생성
             chart_data = {}
@@ -237,24 +240,37 @@ include_analysis: [값]"""
             
             if stock_symbol:
                 try:
-                    # 차트 생성 요청
-                    chart_result = visualization_service.generate_stock_chart(
-                        symbol=stock_symbol,
-                        period=strategy['data_period'],
-                        chart_type=strategy['chart_type'],
-                        indicators=strategy['indicators'],
-                        comparison_symbols=strategy['comparison_symbols']
-                    )
+                    # 금융 데이터 가져오기
+                    financial_data = financial_data_service.get_financial_data(stock_symbol)
                     
-                    if chart_result and chart_result.get('success'):
-                        chart_data = chart_result.get('chart_data', {})
-                        chart_image = chart_result.get('chart_base64')
-                        self.log(f"차트 생성 완료: {stock_symbol}")
+                    if 'error' not in financial_data:
+                        # 차트 생성 요청 (visualization_service 직접 사용)
+                        chart_base64 = visualization_service.create_chart(
+                            chart_type='candlestick_volume',
+                            data=financial_data,
+                            period=strategy['data_period']
+                        )
+                        
+                        if chart_base64:
+                            chart_data = {
+                                'chart_type': 'candlestick_volume',
+                                'period': strategy['data_period'],
+                                'symbol': stock_symbol,
+                                'indicators': strategy['indicators']
+                            }
+                            chart_image = chart_base64
+                            self.log(f"차트 생성 완료: {stock_symbol}")
+                        else:
+                            chart_data = {'error': '차트 생성 실패'}
+                            self.log("차트 생성 실패: base64 없음")
                     else:
-                        self.log(f"차트 생성 실패: {chart_result.get('error', '알 수 없는 오류')}")
+                        chart_data = {'error': financial_data.get('error', '데이터 조회 실패')}
+                        self.log(f"데이터 조회 실패: {financial_data.get('error')}")
                         
                 except Exception as e:
                     self.log(f"차트 생성 오류: {e}")
+                    import traceback
+                    traceback.print_exc()
                     chart_data = {'error': str(e)}
             else:
                 chart_data = {'error': '종목을 찾을 수 없습니다.'}
@@ -286,26 +302,4 @@ include_analysis: [값]"""
                 'chart_data': {'error': str(e)},
                 'analysis_result': "차트 생성에 실패했습니다."
             }
-    
-    def _extract_stock_symbol(self, query: str) -> Optional[str]:
-        """쿼리에서 주식 심볼 추출"""
-        # 간단한 키워드 매칭
-        stock_keywords = {
-            '삼성전자': '005930',
-            '네이버': '035420', 
-            '카카오': '035720',
-            'SK하이닉스': '000660',
-            'LG화학': '051910',
-            '현대차': '005380',
-            'POSCO': '005490',
-            'KB금융': '105560',
-            '신한지주': '055550',
-            'LG전자': '066570'
-        }
-        
-        for keyword, symbol in stock_keywords.items():
-            if keyword in query:
-                return symbol
-        
-        return None
 

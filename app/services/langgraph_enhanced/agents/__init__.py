@@ -23,6 +23,7 @@
 
 from .base_agent import BaseAgent
 from .query_analyzer import QueryAnalyzerAgent
+from .investment_intent_detector import InvestmentIntentDetector
 from .data_agent import DataAgent
 from .news_agent import NewsAgent
 from .analysis_agent import AnalysisAgent
@@ -49,7 +50,8 @@ __all__ = [
     'BaseAgent',
     
     # 전문 에이전트
-    'QueryAnalyzerAgent', 
+    'QueryAnalyzerAgent',
+    'InvestmentIntentDetector',
     'DataAgent',
     'NewsAgent',
     'AnalysisAgent',

@@ -242,19 +242,40 @@ recommendation_style: [값]"""
                     self.log(f"실시간 데이터 수집 오류: {e}")
                     financial_data = {}
             
-            # 2. RAG에서 재무제표 데이터 가져오기
+            # 2. RAG에서 재무제표 데이터 가져오기 (한글 + 영어 모두 검색)
             rag_financial_context = ""
             if stock_name:
                 try:
                     self.log(f"RAG 재무제표 검색: {stock_name}")
-                    rag_query = f"{stock_name} 재무제표 재무 분석 실적"
-                    rag_financial_context = get_context_for_query(
-                        query=rag_query,
-                        top_k=5,
+                    # 한글 이름으로 검색
+                    rag_query_kr = f"{stock_name} 재무제표 재무 분석 실적"
+                    # 영어 이름으로도 검색
+                    english_name = self._get_english_name(stock_name)
+                    rag_query_en = f"{english_name} financial statement analysis"
+                    
+                    # 한글 검색
+                    rag_context_kr = get_context_for_query(
+                        query=rag_query_kr,
+                        top_k=3,
                         namespace=KNOWLEDGE_NAMESPACES["financial_analysis"]
                     )
+                    # 영어 검색
+                    rag_context_en = get_context_for_query(
+                        query=rag_query_en,
+                        top_k=3,
+                        namespace=KNOWLEDGE_NAMESPACES["financial_analysis"]
+                    )
+                    
+                    # 두 결과 통합
+                    if rag_context_kr and rag_context_en:
+                        rag_financial_context = f"{rag_context_kr}\n\n{rag_context_en}"
+                    elif rag_context_kr:
+                        rag_financial_context = rag_context_kr
+                    elif rag_context_en:
+                        rag_financial_context = rag_context_en
+                    
                     if rag_financial_context:
-                        self.log(f"RAG 재무제표 발견: {len(rag_financial_context)} 글자")
+                        self.log(f"RAG 재무제표 발견: {len(rag_financial_context or '')} 글자")
                     else:
                         self.log("RAG 재무제표 없음")
                 except Exception as e:
@@ -283,16 +304,25 @@ recommendation_style: [값]"""
                                 summary += f" ({news.get('published')})"
                             news_summaries.append(summary)
                         news_context = "\n".join(news_summaries)
-                        self.log(f"뉴스 수집 완료: {len(recent_news)}건")
+                        self.log(f"뉴스 수집 완료: {len(recent_news or [])}건")
                     else:
                         self.log("뉴스 없음")
+                        recent_news = []  # None 대신 빈 리스트
                 except Exception as e:
                     self.log(f"뉴스 검색 오류: {e}")
                     import traceback
                     traceback.print_exc()
             
-            # 4. 통합 분석 수행
+            # 4. 통합 분석 수행 (CoT 추가)
             if financial_data or rag_financial_context or news_context:
+                # 뉴스 요약 (간단하게)
+                news_summary = ""
+                if recent_news:
+                    news_summary = "\n".join([
+                        f"• [{news.get('published', 'N/A')}] {news.get('title', 'N/A')}"
+                        for news in recent_news[:3]  # 최대 3개만
+                    ])
+                
                 analysis_prompt = f"""당신은 전문 투자 분석가입니다. 다음 정보를 종합하여 투자 분석을 제공해주세요.
 
 ## 사용자 질문
@@ -311,29 +341,73 @@ recommendation_style: [값]"""
 ## 2. 재무제표 및 재무 분석 (RAG)
 {rag_financial_context if rag_financial_context else "재무제표 데이터 없음"}
 
-## 3. 최신 뉴스
-{news_context if news_context else "최신 뉴스 없음"}
+## 3. 최신 뉴스 (참고용 - 신뢰성 향상)
+{news_summary if news_summary else "최신 뉴스 없음"}
 
 ## 분석 요구사항
-1. **재무 분석**: 재무제표 데이터를 바탕으로 재무 건전성, 수익성, 성장성 평가
-2. **뉴스 분석**: 최신 뉴스를 반영한 시장 동향 및 이슈 파악
-3. **종합 평가**: 재무 + 뉴스를 통합한 투자 의견
-4. **투자 추천**: 구체적인 투자 전략 및 주의사항
-
-다음 형식으로 응답해주세요:
 
 ### 📊 재무 분석
-[재무제표 기반 분석]
+재무제표 데이터를 바탕으로:
+- 재무 건전성 (부채비율, 유동비율 등)
+- 수익성 (ROE, 영업이익률 등)
+- 성장성 (매출 성장률, 이익 성장률 등)
 
-### 📰 뉴스 분석
-[최신 뉴스 기반 동향 분석]
+### 📰 최신 동향 (뉴스 기반)
+**위의 최신 뉴스 3개를 참고하여**:
+- 최근 주요 이슈 및 이벤트
+- 호재/악재 판단
+- 시장 반응 및 전망
 
-### 💡 종합 투자 의견
-[통합 분석 및 투자 추천]
+### 💡 종합 투자 의견 (Chain-of-Thought 방식)
+**단계별 사고 과정을 명확히 제시하세요:**
 
-### ⚠️ 주의사항
-[리스크 및 주의할 점]
-"""
+1. **📌 현재 상황 평가**
+   - 현재 주가: {financial_data.get('current_price', 'N/A')}원
+   - 밸류에이션: PER {financial_data.get('pe_ratio', 'N/A')}, PBR {financial_data.get('pbr', 'N/A')}
+   - 재무 상태: 간단히 요약
+   - 최근 뉴스: 위 3개 뉴스 제목을 언급하며 시장 분위기 파악
+
+2. **✅ 긍정적 요인 (호재)**
+   - 뉴스에서 파악된 호재 (구체적 제목 언급)
+   - 재무적으로 강한 포인트
+   - 성장 가능성 및 긍정적 전망
+   - **각 요인마다 "왜 호재인가?" 설명**
+
+3. **⚠️ 부정적 요인 및 리스크 (악재)**
+   - 뉴스에서 파악된 악재 (구체적 제목 언급)
+   - 재무적 약점
+   - 투자 리스크 요소
+   - **각 요인마다 "왜 악재인가?" 설명**
+
+4. **🎯 투자 판단 근거 (가장 중요!)**
+   - "긍정 vs 부정" 요인 균형 분석
+   - **왜 이 회사에 투자해야 하는가? (또는 하지 말아야 하는가?)**
+   - 구체적 판단 이유: "OO 때문에 OO하다고 판단합니다"
+   - 투자 의견: 매수/적극매수/관망/매도 중 하나
+   - 목표가/손절가 제시 (가능한 경우)
+
+5. **📋 구체적 실행 전략**
+   - 진입 타이밍: "지금 바로" or "OO원 근처 조정 대기" or "분할 매수"
+   - 분할 매수/매도 전략: "3회 분할", "30%씩 매수" 등 구체적
+   - 모니터링 포인트: "어떤 지표를 봐야 하는가?"
+   - 투자 기간: {strategy.get('time_horizon', 'medium')} 기간 권장
+
+### ⚠️ 리스크 경고
+- 주요 투자 리스크 3가지
+- 변동성 요인
+- 추가 확인이 필요한 사항
+
+## 응답 형식
+- **반드시 위의 최신 뉴스 제목을 언급**하며 분석하세요
+- 각 단계마다 "왜 그렇게 판단했는지" 근거를 명확히 제시
+- 숫자와 데이터를 활용하여 구체적으로 작성
+- 이모지를 적절히 사용하여 가독성 향상
+
+## 중요 원칙
+✅ **신뢰성**: 최신 뉴스 제목을 직접 언급하여 분석의 근거 제시
+✅ **구체성**: "좋다/나쁘다"가 아닌 "OO 때문에 OO하다"로 설명
+✅ **균형성**: 호재와 악재를 모두 객관적으로 분석
+✅ **실용성**: 실제 투자에 바로 활용 가능한 구체적 전략 제시"""
                 
                 analysis_response = self.llm.invoke(analysis_prompt)
                 analysis_result = analysis_response.content
@@ -360,8 +434,9 @@ recommendation_style: [값]"""
             return {
                 'success': True,
                 'financial_data': financial_data,
-                'rag_context_length': len(rag_financial_context),
-                'news_count': len(recent_news),
+                'rag_context_length': len(rag_financial_context) if rag_financial_context else 0,
+                'news_count': len(recent_news) if recent_news else 0,
+                'news_data': recent_news or [],  # ← 뉴스 데이터 추가 ✨
                 'analysis_result': analysis_result,
                 'strategy': strategy,
                 'stock_symbol': stock_symbol,
@@ -414,37 +489,44 @@ recommendation_style: [값]"""
         return name_mapping.get(korean_name, korean_name)
     
     def _extract_stock_name(self, query: str) -> Optional[str]:
-        """쿼리에서 종목명 추출"""
-        stock_names = [
-            '삼성전자', '네이버', '카카오', 'SK하이닉스', 'LG화학',
-            '현대차', 'POSCO', '기아', 'LG전자', '삼성바이오로직스'
+        """쿼리에서 종목명 추출 (키워드 제거 방식)"""
+        # 제거할 키워드들
+        keywords_to_remove = [
+            "주가", "주식", "시세", "가격", "얼마", "알려줘", "알려주세요", "어때", "어떄",
+            "최근", "동향", "뉴스", "분석", "전망", "예측", "정보", "상황", "현황",
+            "어떻게", "어떤", "무엇", "뭐", "궁금", "궁금해", "궁금합니다", "현재가",
+            "차트", "그래프", "시각화", "보여줘", "보여주세요", "투자", "해도", "될까",
+            "지금", "매수", "매도", "사도", "팔아도", "괜찮", "추천", "해줘", "해주세요"
         ]
         
-        for name in stock_names:
-            if name in query:
-                return name
+        cleaned_query = query
+        for keyword in keywords_to_remove:
+            cleaned_query = cleaned_query.replace(keyword, "")
+        
+        # 공백 제거 및 정리
+        stock_name = cleaned_query.strip()
+        
+        # 최소 길이 체크
+        if stock_name and len(stock_name) >= 2:
+            return stock_name
         
         return None
     
     def _extract_stock_symbol(self, query: str) -> Optional[str]:
         """쿼리에서 주식 심볼 추출"""
-        # 간단한 키워드 매칭
-        stock_keywords = {
-            '삼성전자': '005930',
-            '네이버': '035420', 
-            '카카오': '035720',
-            'SK하이닉스': '000660',
-            'LG화학': '051910',
-            '현대차': '005380',
-            'POSCO': '005490',
-            'KB금융': '105560',
-            '신한지주': '055550',
-            'LG전자': '066570'
-        }
-        
-        for keyword, symbol in stock_keywords.items():
-            if keyword in query:
-                return symbol
-        
-        return None
+        try:
+            # stock_utils 사용
+            from app.utils.stock_utils import extract_symbol_from_query
+            symbol = extract_symbol_from_query(query)
+            
+            if symbol:
+                self.log(f"심볼 추출 성공: {query} → {symbol}")
+            else:
+                self.log(f"심볼 추출 실패: {query}")
+            
+            return symbol
+            
+        except Exception as e:
+            self.log(f"심볼 추출 오류: {e}")
+            return None
 

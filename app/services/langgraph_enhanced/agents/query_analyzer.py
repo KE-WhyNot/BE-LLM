@@ -5,6 +5,7 @@
 
 from typing import Dict, Any
 from .base_agent import BaseAgent
+from .investment_intent_detector import InvestmentIntentDetector
 
 
 class QueryAnalyzerAgent(BaseAgent):
@@ -13,6 +14,8 @@ class QueryAnalyzerAgent(BaseAgent):
     def __init__(self):
         super().__init__(purpose="classification")
         self.agent_name = "query_analyzer"
+        # 투자 의도 감지 에이전트 초기화
+        self.investment_detector = InvestmentIntentDetector()
     
     def get_prompt_template(self) -> str:
         """쿼리 분석 프롬프트 템플릿"""
@@ -153,8 +156,73 @@ next_agent: [값]"""
             }
     
     def process(self, user_query: str) -> Dict[str, Any]:
-        """쿼리 분석 처리"""
+        """쿼리 분석 처리 (LLM 기반 투자 의도 감지)"""
+        # 1. LLM 기반 투자 의도 감지 (별도 에이전트)
+        investment_intent = self.investment_detector.detect(user_query)
+        is_investment_question = investment_intent['is_investment_question']
+        requires_deep_analysis = investment_intent['requires_deep_analysis']
+        
+        # 2. 일반 쿼리 분석
         prompt = self.get_prompt_template().format(user_query=user_query)
         response = self.llm.invoke(prompt)
-        return self.parse_response(response.content.strip())
+        analysis_result = self.parse_response(response.content.strip())
+        
+        # 3. 투자 의도 정보 통합
+        analysis_result['is_investment_question'] = is_investment_question
+        analysis_result['investment_detection'] = investment_intent
+        
+        # 4. 투자 질문이면 복잡도 상향 및 analysis 서비스 추가
+        if is_investment_question:
+            # 복잡도 상향 (최소 moderate)
+            if analysis_result.get('complexity_level') == 'simple':
+                analysis_result['complexity_level'] = 'moderate'
+            
+            # 깊은 분석 필요하면 complex로
+            if requires_deep_analysis and analysis_result.get('complexity_level') != 'complex':
+                analysis_result['complexity_level'] = 'moderate'  # moderate로 설정 (너무 무거우면 안됨)
+            
+            # 필요 서비스에 analysis 추가
+            required_services = analysis_result.get('required_services', [])
+            if 'analysis' not in required_services:
+                required_services.append('analysis')
+                analysis_result['required_services'] = required_services
+            
+            self.log(f"💡 투자 질문 감지 (신뢰도: {investment_intent['confidence']:.2f})")
+            self.log(f"   {investment_intent['reasoning']}")
+        
+        return analysis_result
+
+
+        is_investment_question = investment_intent['is_investment_question']
+        requires_deep_analysis = investment_intent['requires_deep_analysis']
+        
+        # 2. 일반 쿼리 분석
+        prompt = self.get_prompt_template().format(user_query=user_query)
+        response = self.llm.invoke(prompt)
+        analysis_result = self.parse_response(response.content.strip())
+        
+        # 3. 투자 의도 정보 통합
+        analysis_result['is_investment_question'] = is_investment_question
+        analysis_result['investment_detection'] = investment_intent
+        
+        # 4. 투자 질문이면 복잡도 상향 및 analysis 서비스 추가
+        if is_investment_question:
+            # 복잡도 상향 (최소 moderate)
+            if analysis_result.get('complexity_level') == 'simple':
+                analysis_result['complexity_level'] = 'moderate'
+            
+            # 깊은 분석 필요하면 complex로
+            if requires_deep_analysis and analysis_result.get('complexity_level') != 'complex':
+                analysis_result['complexity_level'] = 'moderate'  # moderate로 설정 (너무 무거우면 안됨)
+            
+            # 필요 서비스에 analysis 추가
+            required_services = analysis_result.get('required_services', [])
+            if 'analysis' not in required_services:
+                required_services.append('analysis')
+                analysis_result['required_services'] = required_services
+            
+            self.log(f"💡 투자 질문 감지 (신뢰도: {investment_intent['confidence']:.2f})")
+            self.log(f"   {investment_intent['reasoning']}")
+        
+        return analysis_result
 
