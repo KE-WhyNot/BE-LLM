@@ -1,0 +1,1 @@
+"""Stock utilities module"""
