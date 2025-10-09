@@ -30,13 +30,13 @@ import hashlib
 from sentence_transformers import SentenceTransformer
 import numpy as np
 
-# Neo4j 연동
+# Neo4j 연동 (neo4j 공식 드라이버 사용 - Aura 지원)
 try:
-    from py2neo import Graph, Node, Relationship
+    from neo4j import GraphDatabase
     NEO4J_AVAILABLE = True
 except ImportError:
     NEO4J_AVAILABLE = False
-    print("⚠️ py2neo 모듈이 없습니다. Neo4j 기능을 사용할 수 없습니다.")
+    print("⚠️ neo4j 모듈이 없습니다. Neo4j 기능을 사용할 수 없습니다.")
 
 from app.config import settings
 
@@ -87,12 +87,12 @@ class MKNewsScraper:
         # 한국어 임베딩 모델 초기화 (KF-DeBERTa 기반)
         self.embedding_model = SentenceTransformer('kakaobank/kf-deberta-base')
         
-        # Neo4j 연결 설정
-        self.neo4j_graph = None
+        # Neo4j 연결 설정 (Aura 지원)
+        self.neo4j_driver = None
         self._initialize_neo4j()
     
     def _initialize_neo4j(self):
-        """Neo4j 연결 초기화"""
+        """Neo4j 연결 초기화 (Aura 지원)"""
         if not NEO4J_AVAILABLE:
             logger.warning("Neo4j 기능을 사용할 수 없습니다.")
             return
@@ -103,28 +103,39 @@ class MKNewsScraper:
             neo4j_user = getattr(settings, 'neo4j_user', 'neo4j')
             neo4j_password = getattr(settings, 'neo4j_password', 'password')
             
-            self.neo4j_graph = Graph(neo4j_uri, auth=(neo4j_user, neo4j_password))
-            logger.info("Neo4j 연결 성공")
+            # neo4j 공식 드라이버 사용 (Aura 지원)
+            self.neo4j_driver = GraphDatabase.driver(
+                neo4j_uri, 
+                auth=(neo4j_user, neo4j_password)
+            )
+            
+            # 연결 테스트
+            with self.neo4j_driver.session() as session:
+                result = session.run("RETURN 1")
+                result.single()
+            
+            logger.info(f"Neo4j 연결 성공: {neo4j_uri}")
             
             # 인덱스 생성
             self._create_neo4j_indexes()
             
         except Exception as e:
             logger.error(f"Neo4j 연결 실패: {e}")
-            self.neo4j_graph = None
+            self.neo4j_driver = None
     
     def _create_neo4j_indexes(self):
         """Neo4j 인덱스 생성"""
-        if not self.neo4j_graph:
+        if not self.neo4j_driver:
             return
         
         try:
-            # 기사 ID 인덱스
-            self.neo4j_graph.run("CREATE INDEX article_id_index IF NOT EXISTS FOR (a:Article) ON (a.article_id)")
-            # 카테고리 인덱스
-            self.neo4j_graph.run("CREATE INDEX article_category_index IF NOT EXISTS FOR (a:Article) ON (a.category)")
-            # 발행일 인덱스
-            self.neo4j_graph.run("CREATE INDEX article_published_index IF NOT EXISTS FOR (a:Article) ON (a.published)")
+            with self.neo4j_driver.session() as session:
+                # 기사 ID 인덱스
+                session.run("CREATE INDEX article_id_index IF NOT EXISTS FOR (a:Article) ON (a.article_id)")
+                # 카테고리 인덱스
+                session.run("CREATE INDEX article_category_index IF NOT EXISTS FOR (a:Article) ON (a.category)")
+                # 발행일 인덱스
+                session.run("CREATE INDEX article_published_index IF NOT EXISTS FOR (a:Article) ON (a.published)")
             logger.info("Neo4j 인덱스 생성 완료")
         except Exception as e:
             logger.error(f"Neo4j 인덱스 생성 실패: {e}")
@@ -273,8 +284,8 @@ class MKNewsScraper:
         return articles
     
     async def store_to_neo4j(self, articles: List[MKNewsArticle]) -> Dict[str, int]:
-        """Neo4j에 뉴스 기사 저장"""
-        if not self.neo4j_graph:
+        """Neo4j에 뉴스 기사 저장 (neo4j 드라이버 사용)"""
+        if not self.neo4j_driver:
             logger.error("Neo4j 연결이 없습니다")
             return {"error": "Neo4j 연결 실패"}
         
@@ -288,63 +299,137 @@ class MKNewsScraper:
         }
         
         try:
-            # 트랜잭션 시작
-            tx = self.neo4j_graph.begin()
-            
-            for article in articles:
-                try:
-                    # 기존 기사 확인
-                    existing = self.neo4j_graph.nodes.match(
-                        "Article", article_id=article.article_id
-                    ).first()
-                    
-                    if existing:
-                        # 기존 기사 업데이트
-                        existing['title'] = article.title
-                        existing['content'] = article.content
-                        existing['summary'] = article.summary
-                        existing['embedding'] = article.embedding
-                        existing['updated_at'] = datetime.now().isoformat()
+            with self.neo4j_driver.session() as session:
+                for article in articles:
+                    try:
+                        # MERGE를 사용하여 중복 방지
+                        query = """
+                        MERGE (a:Article {article_id: $article_id})
+                        ON CREATE SET
+                            a.title = $title,
+                            a.link = $link,
+                            a.published = $published,
+                            a.category = $category,
+                            a.content = $content,
+                            a.summary = $summary,
+                            a.embedding = $embedding,
+                            a.created_at = datetime()
+                        ON MATCH SET
+                            a.title = $title,
+                            a.content = $content,
+                            a.summary = $summary,
+                            a.embedding = $embedding,
+                            a.updated_at = datetime()
+                        RETURN a.article_id, 
+                               CASE WHEN a.created_at = datetime() THEN 'created' ELSE 'updated' END as status
+                        """
                         
-                        tx.push(existing)
-                        stats["updated_articles"] += 1
-                    else:
-                        # 새 기사 생성
-                        article_node = Node(
-                            "Article",
-                            article_id=article.article_id,
-                            title=article.title,
-                            link=article.link,
-                            published=article.published,
-                            category=article.category,
-                            content=article.content,
-                            summary=article.summary,
-                            embedding=article.embedding,
-                            created_at=datetime.now().isoformat()
-                        )
+                        result = session.run(query, {
+                            'article_id': article.article_id,
+                            'title': article.title,
+                            'link': article.link,
+                            'published': article.published,
+                            'category': article.category,
+                            'content': article.content,
+                            'summary': article.summary,
+                            'embedding': article.embedding
+                        })
                         
-                        tx.create(article_node)
-                        stats["new_articles"] += 1
-                    
-                except Exception as e:
-                    logger.error(f"기사 저장 실패 ({article.title}): {e}")
-                    stats["errors"] += 1
-                    continue
+                        record = result.single()
+                        if record:
+                            if record['status'] == 'created':
+                                stats["new_articles"] += 1
+                            else:
+                                stats["updated_articles"] += 1
+                        
+                    except Exception as e:
+                        logger.error(f"기사 저장 실패 ({article.title}): {e}")
+                        stats["errors"] += 1
+                        continue
             
-            # 트랜잭션 커밋
-            tx.commit()
-            logger.info("Neo4j 저장 완료")
+            logger.info(f"Neo4j 저장 완료: 신규 {stats['new_articles']}개, 업데이트 {stats['updated_articles']}개, 실패 {stats['errors']}개")
+            
+            # Relationship 생성 (새로운 세션에서)
+            await self._create_relationships()
+            
+            return stats
             
         except Exception as e:
-            logger.error(f"Neo4j 저장 실패: {e}")
-            tx.rollback()
-            stats["error"] = str(e)
+            logger.error(f"Neo4j 저장 중 오류: {e}")
+            return {"error": str(e)}
+    
+    async def _create_relationships(self):
+        """기사 간 관계 생성 (SIMILAR_TO, MENTIONS)"""
+        if not self.neo4j_driver:
+            logger.error("Neo4j 연결이 없습니다")
+            return
         
-        return stats
+        try:
+            logger.info("Relationship 생성 시작...")
+            
+            with self.neo4j_driver.session() as session:
+                # 1. SIMILAR_TO: 유사한 기사끼리 연결 (임베딩 유사도 기반)
+                logger.info("  - SIMILAR_TO 관계 생성 중...")
+                similar_query = """
+                MATCH (a1:Article), (a2:Article)
+                WHERE a1.article_id < a2.article_id
+                AND a1.embedding IS NOT NULL 
+                AND a2.embedding IS NOT NULL
+                WITH a1, a2, gds.similarity.cosine(a1.embedding, a2.embedding) AS similarity
+                WHERE similarity > 0.7
+                MERGE (a1)-[r:SIMILAR_TO]->(a2)
+                SET r.similarity = similarity
+                RETURN count(r) as count
+                """
+                result = session.run(similar_query)
+                similar_count = result.single()['count']
+                logger.info(f"  ✅ SIMILAR_TO: {similar_count}개 생성")
+                
+                # 2. SAME_CATEGORY: 같은 카테고리 연결
+                logger.info("  - SAME_CATEGORY 관계 생성 중...")
+                category_query = """
+                MATCH (a1:Article), (a2:Article)
+                WHERE a1.article_id < a2.article_id
+                AND a1.category = a2.category
+                MERGE (a1)-[r:SAME_CATEGORY]->(a2)
+                RETURN count(r) as count
+                """
+                result = session.run(category_query)
+                category_count = result.single()['count']
+                logger.info(f"  ✅ SAME_CATEGORY: {category_count}개 생성")
+                
+                # 3. MENTIONS: 주요 키워드 노드 생성 및 연결
+                logger.info("  - MENTIONS (키워드) 관계 생성 중...")
+                keywords = ['삼성전자', 'SK하이닉스', '현대차', 'LG전자', '반도체', '금리', '환율', '주식', '증권']
+                
+                mentions_count = 0
+                for keyword in keywords:
+                    keyword_query = """
+                    MATCH (a:Article)
+                    WHERE a.title CONTAINS $keyword OR a.summary CONTAINS $keyword
+                    MERGE (k:Keyword {name: $keyword})
+                    MERGE (a)-[r:MENTIONS]->(k)
+                    RETURN count(r) as count
+                    """
+                    result = session.run(keyword_query, keyword=keyword)
+                    count = result.single()['count']
+                    mentions_count += count
+                    if count > 0:
+                        logger.info(f"    - '{keyword}': {count}개 연결")
+                
+                logger.info(f"  ✅ MENTIONS: {mentions_count}개 생성")
+                
+                total_relationships = similar_count + category_count + mentions_count
+                logger.info(f"\n✅ 총 {total_relationships}개 Relationship 생성 완료!")
+            
+        except Exception as e:
+            logger.error(f"Relationship 생성 실패: {e}")
+            import traceback
+            traceback.print_exc()
     
     async def search_similar_articles(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """유사한 기사 검색 (임베딩 기반)"""
-        if not self.neo4j_graph:
+        """유사한 기사 검색 (임베딩 기반 - neo4j 드라이버 사용)"""
+        if not self.neo4j_driver:
             logger.error("Neo4j 연결이 없습니다")
             return []
         
@@ -363,13 +448,16 @@ class MKNewsScraper:
             LIMIT $limit
             """
             
-            results = self.neo4j_graph.run(
-                cypher_query, 
-                query_embedding=query_embedding, 
-                limit=limit
-            ).data()
+            with self.neo4j_driver.session() as session:
+                result = session.run(
+                    cypher_query, 
+                    query_embedding=query_embedding, 
+                    limit=limit
+                )
+                
+                results = [dict(record) for record in result]
             
-            logger.info(f"검색 결과: {len(results)}개 (유사도 > 0.5)")
+            logger.info(f"검색 결과: {len(results)}개")
             
             return results
             
@@ -456,16 +544,30 @@ class MKKnowledgeGraphService:
             }
     
     async def search_news(self, query: str, category: str = None, limit: int = 10) -> List[Dict[str, Any]]:
-        """뉴스 검색"""
+        """뉴스 검색 (키 정리 포함)"""
         try:
             # 임베딩 기반 유사 검색
             results = await self.scraper.search_similar_articles(query, limit)
             
+            # 키 이름 정리 (a.title -> title)
+            cleaned_results = []
+            for r in results:
+                cleaned = {
+                    'article_id': r.get('a.article_id'),
+                    'title': r.get('a.title'),
+                    'summary': r.get('a.summary'),
+                    'link': r.get('a.link'),
+                    'published': r.get('a.published'),
+                    'category': r.get('a.category'),
+                    'similarity': r.get('similarity')
+                }
+                cleaned_results.append(cleaned)
+            
             # 카테고리 필터링
             if category:
-                results = [r for r in results if r['category'] == category]
+                cleaned_results = [r for r in cleaned_results if r['category'] == category]
             
-            return results
+            return cleaned_results
             
         except Exception as e:
             logger.error(f"뉴스 검색 실패: {e}")
