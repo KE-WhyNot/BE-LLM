@@ -36,4 +36,6 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # 애플리케이션 실행
-CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD ["/bin/sh", "-c", "echo '--- Starting Container ---' && echo 'PORT is: $PORT' && echo '--- Listing files in /app ---' && ls -lR /app && echo '--- Attempting to run uvicorn ---' && uvicorn app.main:app 
+     --host 0.0.0.0 --port ${PORT:-8000}"]
