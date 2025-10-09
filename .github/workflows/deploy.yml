@@ -42,7 +42,6 @@ jobs:
   #       pytest -q tests/_smoke_test.py
 
   build-and-deploy:
-    needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
