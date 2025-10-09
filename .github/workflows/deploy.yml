@@ -10,7 +10,6 @@ env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: asia-northeast3
   SERVICE_NAME: ai-service
-  REPOSITORY: ai-repository
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
@@ -47,33 +46,45 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Cloud SDK
-      uses: google-github-actions/setup-gcloud@v2
-      with:
-        service_account_key: ${{ secrets.GCP_SA_KEY }}
-        project_id: ${{ secrets.GCP_PROJECT_ID }}
+      # 1) GCP 인증(Cloud Run 배포용)
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-    - name: Configure Docker for Artifact Registry
-      run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+      # 2) gcloud 설치/프로젝트 세팅
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
 
-    - name: Build & Tag
-      run: |
-        AR_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$SERVICE_NAME:$GITHUB_SHA"
-        docker build -t "$AR_IMAGE" .
-        docker tag "$AR_IMAGE" "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$SERVICE_NAME:latest"
+      # 3) Docker Hub 로그인 (공개 이미지 푸시)
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
 
-    - name: Push to Artifact Registry
-      run: |
-        docker push "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$SERVICE_NAME:$GITHUB_SHA"
-        docker push "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$SERVICE_NAME:latest"
+      # 4) Build & Tag (Docker Hub)
+      - name: Build & Tag
+        run: |
+          IMAGE="docker.io/${{ env.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+          docker build -t "$IMAGE" .
+          docker tag "$IMAGE" "docker.io/${{ env.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:latest"
 
-    - name: Deploy to Cloud Run
-      run: |
-        gcloud run deploy $SERVICE_NAME \
-          --image $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$SERVICE_NAME:$GITHUB_SHA \
-          --platform managed \
-          --region $REGION \
-          --allow-unauthenticated \
-          --port 8000
+      # 5) Push to Docker Hub
+      - name: Push to Docker Hub
+        run: |
+          docker push "docker.io/${{ env.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+          docker push "docker.io/${{ env.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:latest"
+
+      # 6) Cloud Run 배포 (Docker Hub 공개 이미지 사용)
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "${{ env.SERVICE_NAME }}" \
+            --image "docker.io/${{ env.DOCKERHUB_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}" \
+            --platform managed \
+            --region "${{ env.REGION }}" \
+            --allow-unauthenticated \
+            --port 8000
