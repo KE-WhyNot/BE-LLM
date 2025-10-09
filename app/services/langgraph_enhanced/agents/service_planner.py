@@ -64,7 +64,16 @@ estimated_time: 1.0
 reasoning: 단순 데이터 조회는 병렬화 불필요
 optimization_tips: 캐시 활용 가능
 
-### 예시 2: 복합 분석 요청
+### 예시 2: 투자 분석 요청 (분석 + 뉴스 필수)
+질문: "네이버 지금 투자해도 될까"
+execution_strategy: hybrid
+parallel_groups: [[data_agent], [analysis_agent, news_agent]]
+execution_order: [data_agent, parallel(analysis_agent+news_agent), response_agent]
+estimated_time: 4.0
+reasoning: 투자 판단에는 분석과 최신 뉴스가 필수적이므로 병렬 실행
+optimization_tips: 분석과 뉴스를 동시에 가져와 빠른 응답
+
+### 예시 3: 복합 분석 요청
 질문: "네이버 분석과 최근 뉴스 알려줘"
 execution_strategy: hybrid
 parallel_groups: [[data_agent], [news_agent, knowledge_agent]]
@@ -73,7 +82,16 @@ estimated_time: 3.5
 reasoning: 데이터 조회 후, 뉴스와 지식은 독립적이므로 병렬 실행
 optimization_tips: 뉴스 번역 시간 고려
 
-### 예시 3: 지식 교육
+### 예시 3: 차트/그래프 요청
+질문: "테슬라 그래프로 보여줘"
+execution_strategy: sequential
+parallel_groups: [[visualization_agent]]
+execution_order: [visualization_agent, response_agent]
+estimated_time: 2.5
+reasoning: 차트 생성은 단일 서비스로 처리 가능
+optimization_tips: 기간 지정 시 더 빠른 로딩
+
+### 예시 4: 지식 교육
 질문: "PER이 뭐야?"
 execution_strategy: sequential
 parallel_groups: [[knowledge_agent]]
@@ -82,7 +100,7 @@ estimated_time: 2.0
 reasoning: 단일 지식 검색은 순차 실행으로 충분
 optimization_tips: RAG 캐시 활용
 
-### 예시 4: 종합 분석
+### 예시 5: 종합 분석
 질문: "삼성전자 투자 분석하고 관련 뉴스와 재무제표 용어 설명해줘"
 execution_strategy: hybrid
 parallel_groups: [[data_agent], [news_agent, knowledge_agent], [analysis_agent]]

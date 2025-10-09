@@ -390,8 +390,8 @@ reasoning: [선택한 이유]"""
                 namespace=namespace
             )
             
-            if context and len(context) > 0:
-                self.log(f"RAG 컨텍스트 발견: {len(context)} 글자")
+            if context and len(context or '') > 0:
+                self.log(f"RAG 컨텍스트 발견: {len(context or '')} 글자")
                 return context
             else:
                 self.log("RAG 컨텍스트 없음")
@@ -474,7 +474,7 @@ reasoning: [선택한 이유]"""
             return {
                 'success': True,
                 'namespace': namespace,
-                'rag_context_length': len(rag_context),
+                'rag_context_length': len(rag_context) if rag_context else 0,
                 'explanation_result': explanation_result,
                 'strategy': strategy
             }

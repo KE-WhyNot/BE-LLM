@@ -73,7 +73,8 @@ class VisualizationService:
         ticker = yf.Ticker(symbol)
         hist = ticker.history(period=period)
         
-        if hist.empty:
+        # None 체크 추가
+        if hist is None or hist.empty:
             return self._create_error_chart(f"{symbol} 데이터를 찾을 수 없습니다.")
         
         # 캔들스틱 + 거래량 통합 차트

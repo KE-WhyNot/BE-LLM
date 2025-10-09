@@ -64,6 +64,10 @@ class ExternalAPIService:
             # EPS 처리
             eps = info.get('trailingEps', 'Unknown')
             
+            # 통화 정보 (currency)
+            currency = info.get('currency', 'KRW')  # 기본값: KRW
+            currency_symbol = self._get_currency_symbol(currency)
+            
             return {
                 "symbol": symbol,
                 "current_price": round(latest['Close'], 2),
@@ -84,10 +88,35 @@ class ExternalAPIService:
                 "dividend_yield": info.get('dividendYield', 'Unknown'),
                 "52week_high": info.get('fiftyTwoWeekHigh', 'Unknown'),
                 "52week_low": info.get('fiftyTwoWeekLow', 'Unknown'),
+                "currency": currency,  # 통화 코드 (USD, KRW 등)
+                "currency_symbol": currency_symbol,  # 통화 심볼 ($, ₩ 등)
                 "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M')  # 분까지만 표시
             }
         except Exception as e:
             return {"error": f"데이터 가져오기 실패: {str(e)}"}
+    
+    def _get_currency_symbol(self, currency: str) -> str:
+        """통화 코드를 심볼로 변환
+        
+        Args:
+            currency: 통화 코드 (USD, KRW, EUR 등)
+            
+        Returns:
+            str: 통화 심볼 ($, ₩, € 등)
+        """
+        currency_map = {
+            'USD': '$',
+            'KRW': '₩',
+            'EUR': '€',
+            'JPY': '¥',
+            'GBP': '£',
+            'CNY': '¥',
+            'HKD': 'HK$',
+            'SGD': 'S$',
+            'AUD': 'A$',
+            'CAD': 'C$',
+        }
+        return currency_map.get(currency, currency)  # 매핑 없으면 코드 그대로 반환
     
     def get_news_from_rss(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """

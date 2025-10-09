@@ -195,10 +195,14 @@ reasoning: 다중 소스 정보가 일관성 있음
                     formatted.append(f"- 분석: {result['analysis_result'][:200]}...")
                 
                 if 'news_data' in result:
-                    news_count = len(result['news_data'])
+                    news_count = len(result.get('news_data') or [])
                     formatted.append(f"- 뉴스 {news_count}건 수집")
                     if news_count > 0:
-                        formatted.append(f"  주요 뉴스: {result['news_data'][0].get('title', '')}")
+                        # 모든 뉴스 표시 (최대 10개)
+                        for i, news in enumerate(result['news_data'][:10], 1):
+                            formatted.append(f"  [{i}] {news.get('title', 'N/A')}")
+                            formatted.append(f"      출처: {news.get('source', 'N/A')}, 날짜: {news.get('published', 'N/A')[:10]}")
+
                 
                 if 'explanation_result' in result:
                     formatted.append(f"- 설명: {result['explanation_result'][:200]}...")

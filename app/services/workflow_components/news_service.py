@@ -6,7 +6,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
 from app.services.workflow_components.data_agent_service import NewsCollector
 from app.services.workflow_components.mk_rss_scraper import MKKnowledgeGraphService, search_mk_news
-from app.services.workflow_components.mk_rss_simple import search_mk_news_simple  # 간단 매일경제 RSS
 from app.services.workflow_components.google_rss_translator import google_rss_translator, search_google_news
 from app.utils.stock_utils import get_company_name_from_symbol
 # prompt_manager는 agents/에서 개별 관리

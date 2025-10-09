@@ -130,10 +130,13 @@ class ResponseAgent(BaseAgent):
         if collected_data.get('financial_data'):
             financial_data = collected_data['financial_data']
             if 'error' not in financial_data:
+                # 통화 심볼 가져오기 (기본값: ₩)
+                currency_symbol = financial_data.get('currency_symbol', '₩')
+                
                 info_sections.append(f"""
 📊 **금융 데이터**
 • 종목: {financial_data.get('company_name', 'N/A')}
-• 현재가: {financial_data.get('current_price', 'N/A'):,}원
+• 현재가: {currency_symbol}{financial_data.get('current_price', 'N/A')}
 • 변동률: {financial_data.get('price_change_percent', 'N/A')}%
 • 거래량: {financial_data.get('volume', 'N/A'):,}주
 • PER: {financial_data.get('pe_ratio', 'N/A')}
@@ -142,29 +145,40 @@ class ResponseAgent(BaseAgent):
         
         # 분석 결과
         if collected_data.get('analysis_result'):
+            analysis_text = collected_data['analysis_result'] or ""
             info_sections.append(f"""
 📈 **투자 분석**
-{collected_data['analysis_result'][:500]}{'...' if len(collected_data['analysis_result']) > 500 else ''}""")
+{analysis_text[:500]}{'...' if len(analysis_text) > 500 else ''}""")
         
-        # 뉴스 정보
+        # 뉴스 정보 (출처 명확하게 표시)
         if collected_data.get('news_data'):
-            news_count = len(collected_data['news_data'])
+            news_count = len(collected_data.get('news_data') or [])
+            news_sources = []
+            for news in (collected_data.get('news_data') or [])[:5]:  # 상위 5개 출처 표시
+                source = news.get('source', 'N/A')
+                title = news.get('title', 'N/A')[:50]  # 제목 50자까지
+                published = news.get('published', 'N/A')
+                news_sources.append(f"  - {title}... (출처: {source}, {published})")
+            
             info_sections.append(f"""
 📰 **뉴스 정보**
 • 수집된 뉴스: {news_count}건
-• 주요 뉴스: {collected_data['news_data'][0].get('title', 'N/A') if news_count > 0 else 'N/A'}""")
+• 주요 뉴스 출처:
+{chr(10).join(news_sources)}""")
         
         # 뉴스 분석
         if collected_data.get('news_analysis'):
+            news_text = collected_data['news_analysis'] or ""
             info_sections.append(f"""
 📰 **뉴스 분석**
-{collected_data['news_analysis'][:300]}{'...' if len(collected_data['news_analysis']) > 300 else ''}""")
+{news_text[:300]}{'...' if len(news_text) > 300 else ''}""")
         
         # 지식 정보
         if collected_data.get('knowledge_explanation'):
+            knowledge_text = collected_data['knowledge_explanation'] or ""
             info_sections.append(f"""
 📚 **지식 정보**
-{collected_data['knowledge_explanation'][:300]}{'...' if len(collected_data['knowledge_explanation']) > 300 else ''}""")
+{knowledge_text[:300]}{'...' if len(knowledge_text) > 300 else ''}""")
         
         # 차트 정보
         if collected_data.get('chart_data'):
@@ -178,9 +192,10 @@ class ResponseAgent(BaseAgent):
         
         # 차트 분석
         if collected_data.get('chart_analysis'):
+            chart_text = collected_data['chart_analysis'] or ""
             info_sections.append(f"""
 📊 **차트 분석**
-{collected_data['chart_analysis'][:300]}{'...' if len(collected_data['chart_analysis']) > 300 else ''}""")
+{chart_text[:300]}{'...' if len(chart_text) > 300 else ''}""")
         
         if not info_sections:
             return "수집된 정보가 없습니다."
@@ -214,7 +229,7 @@ class ResponseAgent(BaseAgent):
         # 총 데이터 포인트 계산
         for key, value in collected_data.items():
             if isinstance(value, list):
-                summary['total_data_points'] += len(value)
+                summary['total_data_points'] += len(value) if isinstance(value, (list, str, dict)) else 0
             elif isinstance(value, dict) and value:
                 summary['total_data_points'] += 1
             elif isinstance(value, str) and value:

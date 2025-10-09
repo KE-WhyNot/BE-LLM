@@ -15,6 +15,14 @@ class FallbackAgent(BaseAgent):
         super().__init__(purpose="fallback")
         self.agent_name = "fallback_agent"
     
+    def get_prompt_template(self) -> str:
+        """BaseAgent 인터페이스 구현 (사용 안 함)"""
+        return ""
+    
+    def process(self, *args, **kwargs) -> Dict[str, Any]:
+        """BaseAgent 인터페이스 구현 (사용 안 함)"""
+        return {}
+    
     async def execute_with_fallback(self,
                                     primary_func: Callable,
                                     fallback_funcs: List[Callable],
@@ -204,22 +212,14 @@ class NewsSourceFallback:
             Dict: 뉴스 수집 결과
         """
         from app.services.workflow_components.google_rss_translator import search_google_news
-        from app.services.workflow_components.mk_rss_simple import search_mk_news_simple
         from app.services.workflow_components.news_service import news_service
         
-        # Primary와 Fallback 정의
-        if primary_source == "google_rss":
-            primary_func = search_google_news
-            fallback_funcs = [
-                lambda q, l: search_mk_news_simple(q, l),
-                lambda q, l: news_service.get_financial_news(q)
-            ]
-        else:  # mk_rss
-            primary_func = search_mk_news_simple
-            fallback_funcs = [
-                lambda q, l: search_google_news(q, l),
-                lambda q, l: news_service.get_financial_news(q)
-            ]
+        # Primary: Google RSS (번역된 뉴스)
+        # Fallback: news_service의 다른 소스들
+        primary_func = search_google_news
+        fallback_funcs = [
+            lambda q, l: news_service.get_financial_news(q)
+        ]
         
         # 풀백 실행
         result = await self.fallback_agent.execute_with_fallback(
@@ -244,24 +244,32 @@ class NewsSourceFallback:
         Returns:
             str: 컨텍스트 문자열
         """
-        from app.services.workflow_components.mk_rss_simple import search_mk_news_simple
+        from app.services.workflow_components.mk_rss_scraper import MKNewsScraper
         from app.services.workflow_components.google_rss_translator import search_google_news
         
-        async def get_mk_context(q: str, l: int) -> str:
-            """매일경제 컨텍스트 생성"""
-            articles = await search_mk_news_simple(q, l)
-            if not articles:
+        async def get_mk_kg_context(q: str, l: int) -> str:
+            """매일경제 KG 컨텍스트 생성 (Neo4j)"""
+            try:
+                from app.services.workflow_components.mk_rss_scraper import MKNewsScraper
+                
+                scraper = MKNewsScraper()
+                articles = await scraper.search_similar_articles(q, limit=l)
+                
+                if not articles:
+                    return ""
+                
+                context_parts = ["📚 참고 자료 (매일경제 지식그래프):"]
+                for i, article in enumerate(articles, 1):
+                    context_parts.append(f"\n[기사 {i}] {article.get('title', 'N/A')}")
+                    if article.get('content'):
+                        content = article['content'][:200]
+                        context_parts.append(f"내용: {content}...")
+                    context_parts.append(f"날짜: {article.get('published', 'N/A')}")
+                
+                return "\n".join(context_parts)
+            except Exception as e:
+                print(f"❌ 매일경제 KG 컨텍스트 생성 오류: {e}")
                 return ""
-            
-            context_parts = ["📚 참고 자료 (매일경제 지식그래프):"]
-            for i, article in enumerate(articles, 1):
-                context_parts.append(f"\n[기사 {i}] {article['title']}")
-                if article.get('summary'):
-                    context_parts.append(f"요약: {article['summary'][:200]}...")
-                context_parts.append(f"출처: {article['link']}")
-                context_parts.append(f"날짜: {article['published']}")
-            
-            return "\n".join(context_parts)
         
         async def get_google_context(q: str, l: int) -> str:
             """Google RSS 컨텍스트 생성"""
@@ -278,9 +286,9 @@ class NewsSourceFallback:
             
             return "\n".join(context_parts)
         
-        # 풀백 실행
+        # 풀백 실행: Primary = 매일경제 KG, Fallback = Google RSS
         result = await self.fallback_agent.execute_with_fallback(
-            get_mk_context,
+            get_mk_kg_context,
             [get_google_context],
             query,
             limit
@@ -303,6 +311,14 @@ def get_fallback_agent() -> FallbackAgent:
     if _fallback_agent is None:
         _fallback_agent = FallbackAgent()
     return _fallback_agent
+
+
+def get_news_source_fallback() -> NewsSourceFallback:
+    """뉴스 소스 풀백 헬퍼 싱글톤 인스턴스 반환"""
+    global _news_source_fallback
+    if _news_source_fallback is None:
+        _news_source_fallback = NewsSourceFallback(get_fallback_agent())
+    return _news_source_fallback
 
 
 def get_news_source_fallback() -> NewsSourceFallback:

@@ -27,26 +27,56 @@ class DataAgent(BaseAgent):
 - 복잡도: {complexity_level}
 - 필요 서비스: {required_services}
 
+## 중요: 주식 심볼 변환
+
+**Yahoo Finance에서 사용하는 정확한 심볼**을 data_query에 입력하세요.
+
+### 변환 규칙:
+1. **한국 주식**: 6자리 코드 + `.KS`
+   - 예: 삼성전자 → 005930.KS, 네이버 → 035420.KS
+
+2. **미국 주식**: 표준 티커 심볼 (1~5자 알파벳)
+   - 예: 테슬라 → TSLA, 애플 → AAPL, 디즈니 → DIS, 스타벅스 → SBUX, 나이키 → NKE
+   - **당신의 금융 지식을 활용하여 모든 회사명을 정확한 티커 심볼로 변환하세요**
+
+3. **유럽 주식**: 티커 + 거래소 접미사
+   - 프랑스 (파리): `.PA` (예: LVMH → MC.PA, 에르메스 → RMS.PA)
+   - 영국 (런던): `.L` (예: BP → BP.L)
+   - 독일 (프랑크푸르트): `.DE` (예: BMW → BMW.DE)
+
+4. **이미 심볼 형태**인 경우: 그대로 사용
+   - 예: "TSLA 주가" → TSLA, "DIS 차트" → DIS
+
+**중요**: 
+- 회사명(한글/영어)을 받으면 반드시 Yahoo Finance 티커 심볼로 변환하세요
+- 개별 상장되지 않은 브랜드(예: 구찌)는 모기업 심볼(Kering)을 사용하거나 "상장되지 않음" 안내
+
 ## 데이터 조회 전략
 다음 형식으로 응답해주세요:
 
-data_query: [실제 데이터 조회에 사용할 쿼리]
+data_query: [Yahoo Finance 심볼 - 반드시 티커 심볼 형태]
 data_type: [조회할 데이터 타입 - stock/price/volume/market 등]
 additional_info: [추가로 필요한 정보]
 
 ## 예시
+
 요청: "삼성전자 주가 알려줘"
-data_query: 삼성전자
+data_query: 005930.KS
 data_type: stock
 additional_info: current_price,change_rate,volume
 
-요청: "삼성전자 투자 분석해줘"
-data_query: 삼성전자
+요청: "디즈니 현재가"
+data_query: DIS
 data_type: stock
-additional_info: current_price,financial_ratios,market_data
+additional_info: current_price,change_rate
+
+요청: "인텔 주가"
+data_query: INTC
+data_type: stock
+additional_info: current_price,change_rate,volume
 
 ## 응답 형식
-data_query: [값]
+data_query: [Yahoo Finance 티커 심볼]
 data_type: [값]
 additional_info: [값]"""
     
@@ -115,18 +145,19 @@ additional_info: [값]"""
             change_rate = data.get('price_change_percent', 'N/A')
             change_amount = data.get('price_change', 'N/A')
             volume = data.get('volume', 'N/A')
+            currency_symbol = data.get('currency_symbol', '₩')  # 통화 심볼 가져오기
             
             # 간단하고 친근한 응답 생성
             response_parts = [
                 f"📊 **{stock_name}** 주가 정보",
                 "",
-                f"💰 **현재가**: {current_price:,}원" if isinstance(current_price, (int, float)) else f"💰 **현재가**: {current_price}",
+                f"💰 **현재가**: {currency_symbol}{current_price:,}" if isinstance(current_price, (int, float)) else f"💰 **현재가**: {currency_symbol}{current_price}",
             ]
             
             if change_rate != 'N/A' and change_amount != 'N/A':
                 change_symbol = "📈" if (isinstance(change_rate, (int, float)) and change_rate > 0) or (isinstance(change_amount, (int, float)) and change_amount > 0) else "📉"
                 change_rate_str = f"+{change_rate}%" if isinstance(change_rate, (int, float)) and change_rate > 0 else f"{change_rate}%"
-                change_amount_str = f"+{change_amount:,}원" if isinstance(change_amount, (int, float)) and change_amount > 0 else f"{change_amount:,}원"
+                change_amount_str = f"+{currency_symbol}{change_amount:,}" if isinstance(change_amount, (int, float)) and change_amount > 0 else f"{currency_symbol}{change_amount:,}"
                 response_parts.append(f"{change_symbol} **변동**: {change_rate_str} ({change_amount_str})")
             
             if volume != 'N/A':

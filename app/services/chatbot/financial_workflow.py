@@ -25,6 +25,8 @@ class FinancialWorkflowService:
                 print("✅ 메타 에이전트 워크플로우 라우터 초기화 완료")
             except Exception as e:
                 print(f"⚠️ 메타 에이전트 워크플로우 라우터 초기화 실패: {e}")
+                import traceback
+                traceback.print_exc()
                 self.intelligent_workflow_router = None
         else:
             self.intelligent_workflow_router = None
@@ -95,4 +97,6 @@ class FinancialWorkflowService:
 
 
 # 전역 워크플로우 서비스 인스턴스
+financial_workflow = FinancialWorkflowService()
+
 financial_workflow = FinancialWorkflowService()
