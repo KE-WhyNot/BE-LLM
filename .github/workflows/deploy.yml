@@ -78,5 +78,38 @@ jobs:
           --region '${{ env.REGION }}' \
           --no-allow-unauthenticated \
           --port 8000 \
+          --memory 2Gi \
+          --cpu 2 \
           --timeout 600 \
-          --min-instances 1
+          --min-instances 1 \
+          --set-env-vars="GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" \
+          --set-env-vars="OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
+          --set-env-vars="LANGSMITH_TRACING=${{ secrets.LANGSMITH_TRACING }}" \
+          --set-env-vars="LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}" \
+          --set-env-vars="LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}" \
+          --set-env-vars="LANGSMITH_PROJECT=${{ secrets.LANGSMITH_PROJECT }}" \
+          --set-env-vars="NEO4J_URI=${{ secrets.NEO4J_URI }}" \
+          --set-env-vars="NEO4J_USER=${{ secrets.NEO4J_USER }}" \
+          --set-env-vars="NEO4J_PASSWORD=${{ secrets.NEO4J_PASSWORD }}" \
+          --set-env-vars="PINECONE_API_KEY=${{ secrets.PINECONE_API_KEY }}" \
+          --set-env-vars="PINECONE_INDEX_NAME=${{ secrets.PINECONE_INDEX_NAME }}" \
+          --set-env-vars="PRIMARY_MODEL=${{ secrets.PRIMARY_MODEL }}" \
+          --set-env-vars="GEMINI_MODEL=${{ secrets.GEMINI_MODEL }}" \
+          --set-env-vars="FALLBACK_MODEL=${{ secrets.FALLBACK_MODEL }}" \
+          --set-env-vars="EMBEDDING_MODEL=${{ secrets.EMBEDDING_MODEL }}" \
+          --set-env-vars="EMBEDDING_MODEL_NAME=${{ secrets.EMBEDDING_MODEL_NAME }}" \
+          --set-env-vars="RELATION_EXTRACTION_MODEL=${{ secrets.RELATION_EXTRACTION_MODEL }}" \
+          --set-env-vars="CHUNK_SIZE=${{ secrets.CHUNK_SIZE }}" \
+          --set-env-vars="CHUNK_OVERLAP=${{ secrets.CHUNK_OVERLAP }}" \
+          --set-env-vars="MAX_SEARCH_RESULTS=${{ secrets.MAX_SEARCH_RESULTS }}" \
+          --set-env-vars="BATCH_SIZE=${{ secrets.BATCH_SIZE }}" \
+          --set-env-vars="MAX_LENGTH=${{ secrets.MAX_LENGTH }}" \
+          --set-env-vars="TOP_K=${{ secrets.TOP_K }}" \
+          --set-env-vars="NEWS_COLLECTION_INTERVAL=${{ secrets.NEWS_COLLECTION_INTERVAL }}" \
+          --set-env-vars="CONFIDENCE_THRESHOLD=${{ secrets.CONFIDENCE_THRESHOLD }}" \
+          --set-env-vars="MAX_NEWS_RESULTS=${{ secrets.MAX_NEWS_RESULTS }}" \
+          --set-env-vars="CACHE_DURATION=${{ secrets.CACHE_DURATION }}" \
+          --set-env-vars="REQUEST_TIMEOUT=${{ secrets.REQUEST_TIMEOUT }}" \
+          --set-env-vars="LOG_LEVEL=${{ secrets.LOG_LEVEL }}" \
+          --set-env-vars="LOG_FILE=${{ secrets.LOG_FILE }}" \
+          --set-env-vars="STOCK_CONFIG_PATH=${{ secrets.STOCK_CONFIG_PATH }}"
