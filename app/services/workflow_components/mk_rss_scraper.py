@@ -351,13 +351,13 @@ class MKNewsScraper:
         try:
             # 쿼리 임베딩 생성
             query_embedding = self.embedding_model.encode([query])[0].tolist()
+            logger.info(f"쿼리 '{query}' 임베딩 생성: {len(query_embedding)}차원")
             
             # Neo4j에서 유사도 검색 (코사인 유사도)
             cypher_query = """
             MATCH (a:Article)
             WHERE a.embedding IS NOT NULL
             WITH a, gds.similarity.cosine(a.embedding, $query_embedding) AS similarity
-            WHERE similarity > 0.7
             RETURN a.article_id, a.title, a.summary, a.link, a.published, a.category, similarity
             ORDER BY similarity DESC
             LIMIT $limit
@@ -368,6 +368,8 @@ class MKNewsScraper:
                 query_embedding=query_embedding, 
                 limit=limit
             ).data()
+            
+            logger.info(f"검색 결과: {len(results)}개 (유사도 > 0.5)")
             
             return results
             
