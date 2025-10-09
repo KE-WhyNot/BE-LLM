@@ -5,28 +5,28 @@ RAG, LangChain, LangGraph, LangSmith를 활용한 고급 금융 분석 챗봇 �
 ## 🚀 주요 기능
 
 ### 1. RAG (Retrieval-Augmented Generation)
-- **금융 지식 베이스**: 포괄적인 금융 지식 문서 저장
-- **벡터 검색**: Pinecone을 활용한 의미 기반 문서 검색
+- **금융 지식 베이스**: Pinecone 벡터 DB를 활용한 의미 기반 검색
 - **실시간 데이터**: Yahoo Finance API를 통한 주식 데이터 조회
-- **한국어 임베딩**: kakaobank/kf-deberta-base 모델 사용
+- **한국어 임베딩**: kakaobank/kf-deberta-base 모델 (768차원)
+- **멀티 네임스페이스**: 재무제표, 시장분석, 투자전략별 분리 저장
 
-### 2. LangChain 에이전트
-- **도구 기반 응답**: 금융 데이터 조회, 분석, 뉴스 검색 도구
-- **대화 메모리**: 최근 5개 대화 기억
-- **멀티 LLM 지원**: OpenAI GPT-4, Google Gemini Pro
-- **에러 핸들링**: 견고한 예외 처리 및 복구
+### 2. 뉴스 지식 그래프 (Neo4j)
+- **매일경제 RSS**: 경제/증권/국제/정치 뉴스 수집 및 저장
+- **관계 그래프**: 30,000+ 관계 (SIMILAR_TO, SAME_CATEGORY, MENTIONS)
+- **임베딩 검색**: GDS 코사인 유사도 기반 뉴스 검색
+- **일일 업데이트**: 자동 크론잡으로 최신 뉴스 수집
 
-### 3. LangGraph 워크플로우
-- **복잡한 쿼리 처리**: 다단계 분석 워크플로우
-- **상태 관리**: TypedDict 기반 상태 추적
-- **조건부 라우팅**: 쿼리 유형별 처리 경로
-- **병렬 처리**: 여러 도구의 동시 실행
+### 3. 메타 에이전트 시스템 (LangGraph)
+- **지능형 라우팅**: 쿼리 분석 후 최적 에이전트 선택
+- **11개 전문 에이전트**: News, Data, Analysis, Knowledge, Visualization 등
+- **병렬 실행**: 독립적 태스크 동시 처리
+- **Fallback 전략**: 실패 시 자동 대체 경로
 
 ### 4. LangSmith 모니터링
 - **실시간 추적**: 모든 쿼리와 응답 추적
 - **성능 메트릭**: 응답 시간, 성공률, 에러율
-- **평가 시스템**: 정확성, 관련성, 안전성 평가
-- **리포트 생성**: 자동화된 성능 리포트
+- **워크플로우 추적**: LangGraph 실행 흐름 시각화
+- **에러 분석**: 실패 패턴 감지 및 알림
 
 ## 🏗️ 시스템 아키텍처
 
@@ -48,24 +48,30 @@ RAG, LangChain, LangGraph, LangSmith를 활용한 고급 금융 분석 챗봇 �
 ```
 BE-LLM/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py                 # FastAPI 애플리케이션
-│   ├── config.py              # 설정 관리
+│   ├── main.py                     # FastAPI 애플리케이션
+│   ├── config.py                   # 설정 관리
 │   ├── routers/
-│   │   ├── __init__.py
-│   │   └── chat.py            # 채팅 API 라우터
+│   │   └── chat.py                 # 채팅 API 라우터
 │   ├── schemas/
-│   │   ├── __init__.py
-│   │   └── chat_schema.py     # Pydantic 스키마
+│   │   ├── chat_schema.py          # Pydantic 스키마
+│   │   └── user_schema.py
 │   └── services/
-│       ├── __init__.py
-│       ├── pinecone_rag_service.py # Pinecone RAG 시스템
-│       ├── financial_agent.py # LangChain 에이전트
-│       ├── financial_workflow.py # LangGraph 워크플로우
-│       ├── monitoring_service.py # LangSmith 모니터링
-│       └── chatbot_service.py # 통합 챗봇 서비스
-├── requirements.txt           # 의존성 패키지
-└── README.md                 # 프로젝트 문서
+│       ├── langgraph_enhanced/     # 메타 에이전트 시스템
+│       │   ├── agents/             # 11개 전문 에이전트
+│       │   ├── workflow_router.py  # 워크플로우 라우터
+│       │   └── llm_manager.py      # LLM 관리
+│       ├── workflow_components/    # 워크플로우 컴포넌트
+│       │   ├── mk_rss_scraper.py   # 매일경제 RSS + Neo4j
+│       │   ├── news_service.py     # 뉴스 통합 서비스
+│       │   └── google_rss_translator.py  # Google RSS
+│       ├── pinecone_rag_service.py # Pinecone RAG
+│       ├── portfolio/              # 포트폴리오 분석
+│       └── chatbot_service.py      # 통합 챗봇 서비스
+├── config/
+│   └── stocks.yaml                 # 58개 종목 설정
+├── requirements.txt                # 의존성 (74줄로 최적화)
+├── daily_news_updater.py           # 일일 뉴스 업데이트 크론
+└── README.md
 ```
 
 ## 🛠️ 설치 및 실행
@@ -82,26 +88,24 @@ pip install -r requirements.txt
 # Google AI API Key (Gemini)
 GOOGLE_API_KEY=your_google_api_key_here
 
-# OpenAI API Key (폴백용)
-OPENAI_API_KEY=your_openai_api_key_here
+# LangSmith 설정 (선택)
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
+LANGCHAIN_API_KEY=your_langsmith_api_key_here
+LANGCHAIN_PROJECT=financial-chatbot
 
-# LangSmith 설정
-LANGSMITH_TRACING=true
-LANGSMITH_ENDPOINT=https://api.smith.langchain.com
-LANGSMITH_API_KEY=your_langsmith_api_key_here
-LANGSMITH_PROJECT=financial-chatbot
-
-# Neo4j 설정 (매일경제 뉴스 지식그래프)
-NEO4J_URI=bolt://localhost:7687
+# Neo4j Aura 설정 (매일경제 뉴스 지식그래프)
+NEO4J_URI=neo4j+s://xxxxx.databases.neo4j.io
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=your_neo4j_password
+NEO4J_PASSWORD=your_neo4j_aura_password
 
 # Pinecone 설정 (RAG 벡터 DB)
 PINECONE_API_KEY=your_pinecone_api_key_here
 PINECONE_INDEX_NAME=finance-rag-index
-
-# 임베딩 모델
-EMBEDDING_MODEL=kakaobank/kf-deberta-base
+EMBEDDING_MODEL_NAME=kakaobank/kf-deberta-base
+BATCH_SIZE=32
+MAX_LENGTH=256
+TOP_K=10
 ```
 
 ### 3. 서버 실행
@@ -174,15 +178,17 @@ PER (Price-to-Earnings Ratio)는 주가수익비율을 의미합니다.
 
 ## 🔧 주요 기술 스택
 
-- **FastAPI**: 고성능 웹 프레임워크
+- **FastAPI**: 고성능 비동기 웹 프레임워크
 - **LangChain**: LLM 애플리케이션 프레임워크
-- **LangGraph**: 복잡한 워크플로우 관리
+- **LangGraph**: 메타 에이전트 워크플로우 관리
 - **LangSmith**: LLM 모니터링 및 디버깅
+- **Google Gemini**: 2.0 Flash Exp 모델 (저비용 고성능)
 - **Pinecone**: 클라우드 벡터 데이터베이스 (RAG)
-- **Neo4j**: 그래프 데이터베이스 (지식그래프)
-- **HuggingFace**: 한국어 임베딩 모델
+- **Neo4j Aura**: 관리형 그래프 데이터베이스 + GDS
+- **Sentence Transformers**: kakaobank/kf-deberta-base (한국어 임베딩)
 - **Yahoo Finance**: 실시간 주식 데이터
-- **Pydantic**: 데이터 검증 및 직렬화
+- **Deep Translator**: 뉴스 자동 번역
+- **APScheduler**: 일일 자동 뉴스 수집
 
 ## 📊 모니터링 및 분석
 
@@ -198,14 +204,21 @@ PER (Price-to-Earnings Ratio)는 주가수익비율을 의미합니다.
 - 사용자 만족도
 - 에러 발생률
 
-## 🚀 향후 개발 계획
+## 🚀 최근 업데이트 (2025-10-09)
 
-1. **다국어 지원**: 영어, 일본어 등 추가 언어 지원
-2. **음성 인터페이스**: STT/TTS 기능 추가
-3. **포트폴리오 관리**: 개인 투자 포트폴리오 추천
-4. **실시간 알림**: 주가 변동 알림 서비스
-5. **모바일 앱**: React Native 기반 모바일 앱
-6. **고급 분석**: 머신러닝 기반 예측 모델
+✅ **완료된 작업:**
+1. Neo4j Aura 연동 및 30,283개 관계 그래프 구축
+2. requirements.txt 최적화 (170줄 → 74줄, 56% 감소)
+3. 매일경제 RSS 자동 수집 시스템 구축
+4. 메타 에이전트 시스템 안정화
+5. 레거시 코드 제거 및 문서 정리
+
+📋 **향후 계획:**
+1. 사용자 프로필 기반 맞춤형 응답
+2. 실시간 주식 알림 서비스
+3. 포트폴리오 자동 리밸런싱
+4. 모바일 앱 개발
+5. 고급 차트 분석 (캔들스틱, 이동평균)
 
 ## 🤝 기여하기
 
@@ -226,4 +239,3 @@ PER (Price-to-Earnings Ratio)는 주가수익비율을 의미합니다.
 ---
 
 **⚠️ 주의사항**: 이 챗봇은 교육 및 참고 목적으로 제작되었습니다. 실제 투자 결정은 신중히 하시고, 전문가의 조언을 구하시기 바랍니다.
-LLM
