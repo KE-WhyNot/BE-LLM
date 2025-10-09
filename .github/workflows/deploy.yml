@@ -19,27 +19,27 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    # - name: Set up Python
-    #   uses: actions/setup-python@v4
-    #   with:
-    #     python-version: '3.11'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
     
-    # - name: Install dependencies
-    #   run: |
-    #     python -m pip install --upgrade pip
-    #     pip install -r requirements.txt
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
     
-    # - name: Create smoke test
-    #   run: |
-    #     mkdir -p tests
-    #     cat > tests/_smoke_test.py << 'PY'
-    #     def test_smoke():
-    #         assert True
-    #     PY
+    - name: Create smoke test
+      run: |
+        mkdir -p tests
+        cat > tests/_smoke_test.py << 'PY'
+        def test_smoke():
+            assert True
+        PY
     
-    # - name: Run smoke tests
-    #   run: |
-    #     pytest -q tests/_smoke_test.py
+    - name: Run smoke tests
+      run: |
+        pytest -q tests/_smoke_test.py
 
   build-and-deploy:
     needs: test
@@ -96,7 +96,6 @@ jobs:
           --set-env-vars="PRIMARY_MODEL=${{ secrets.PRIMARY_MODEL }}" \
           --set-env-vars="GEMINI_MODEL=${{ secrets.GEMINI_MODEL }}" \
           --set-env-vars="FALLBACK_MODEL=${{ secrets.FALLBACK_MODEL }}" \
-          --set-env-vars="EMBEDDING_MODEL=${{ secrets.EMBEDDING_MODEL }}" \
           --set-env-vars="EMBEDDING_MODEL_NAME=${{ secrets.EMBEDDING_MODEL_NAME }}" \
           --set-env-vars="RELATION_EXTRACTION_MODEL=${{ secrets.RELATION_EXTRACTION_MODEL }}" \
           --set-env-vars="CHUNK_SIZE=${{ secrets.CHUNK_SIZE }}" \
