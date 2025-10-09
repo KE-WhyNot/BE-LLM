@@ -19,18 +19,12 @@ class Settings(BaseSettings):
     langchain_endpoint: Optional[str] = None
     langchain_project: Optional[str] = None
     
-    # 데이터베이스 설정
-    database_url: Optional[str] = None
-    
-    # 벡터 데이터베이스 설정
-    chroma_persist_directory: Optional[str] = None
-    
-    # Neo4j 설정
+    # Neo4j 설정 (매일경제 뉴스 지식그래프)
     neo4j_uri: Optional[str] = None
     neo4j_user: Optional[str] = None
     neo4j_password: Optional[str] = None
     
-    # Pinecone 설정 (Colab 노트북 방식)
+    # Pinecone 설정 (RAG 벡터 DB)
     pinecone_api_key: Optional[str] = None
     pinecone_index_name: Optional[str] = None
     embedding_model_name: Optional[str] = None

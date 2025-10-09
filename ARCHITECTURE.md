@@ -41,7 +41,8 @@
 
 4. **통합 금융 데이터**
    - yfinance API 실시간 주가 조회
-   - ChromaDB 벡터 검색 (금융 지식)
+   - Pinecone 벡터 검색 (금융 지식 RAG)
+   - Neo4j 지식그래프 (매일경제 뉴스)
    - 차트 시각화 및 분석
 
 ---
@@ -70,7 +71,7 @@
 ✅ 인터페이스 일관성 유지
 - 모든 서비스는 동일한 인터페이스 패턴 사용
 - NewsService는 mk_rss_scraper와 google_rss를 동일하게 처리
-- RAG 서비스는 ChromaDB와 Neo4j를 투명하게 전환 가능
+- RAG 서비스는 Pinecone과 Neo4j를 투명하게 전환 가능
 ```
 
 ### 4. **인터페이스 분리 원칙 (ISP - Interface Segregation Principle)**
@@ -136,7 +137,7 @@ app/
 │   │   └── portfolio_advisor.py             # 포트폴리오 제안
 │   │
 │   └── (공통 서비스)                         # 🔧 유틸리티
-│       ├── rag_service.py                   # ChromaDB RAG
+│       ├── pinecone_rag_service.py          # Pinecone RAG
 │       ├── monitoring_service.py            # 모니터링
 │       └── user_service.py                  # 사용자 관리
 │
@@ -175,7 +176,7 @@ graph TD
     N -->|data| O[FinancialDataService]
     N -->|analysis| P[AnalysisService]
     N -->|news| Q[NewsService]
-    N -->|knowledge| R[RAG Service]
+    N -->|knowledge| R[Pinecone RAG Service]
     N -->|visualization| S[VisualizationService]
     
     Q --> T{뉴스 소스}
@@ -604,7 +605,7 @@ async def get_comprehensive_news(self, query: str, use_embedding: bool = True):
 3. QueryClassifier
    └─► LLM 분류 → "knowledge"
 
-4. RAG Service (ChromaDB)
+4. Pinecone RAG Service
    └─► 벡터 검색 → data/fundamental_analysis.txt
    └─► 컨텍스트: "PER은 주가수익비율로..."
 
@@ -686,15 +687,11 @@ CALL gds.alpha.similarity.cosine.stream({
 ### 4. 데이터베이스 연결 풀링
 
 ```python
-# ChromaDB 연결 재사용
-vectorstore = Chroma(
-    persist_directory="./chroma_db",
-    embedding_function=embeddings,
-    client_settings=Settings(
-        anonymized_telemetry=False,
-        allow_reset=True
-    )
-)
+# Pinecone 클라이언트 재사용
+from pinecone import Pinecone
+
+pc = Pinecone(api_key=PINECONE_API_KEY)
+index = pc.Index(PINECONE_INDEX_NAME)
 
 # Neo4j 연결 풀
 graph = Graph(
@@ -728,24 +725,24 @@ graph = Graph(
 - **Framework**: FastAPI
 - **LLM**: Google Gemini 2.0 Flash
 - **Workflow**: LangGraph (StateGraph)
-- **Vector DB**: ChromaDB (금융 지식)
+- **Vector DB**: Pinecone (금융 지식 RAG)
 - **Graph DB**: Neo4j (뉴스 지식그래프)
 - **Embeddings**: 
   - KF-DeBERTa (카카오뱅크 금융 특화)
   - HuggingFace Sentence Transformers
 - **Financial Data**: yfinance
 - **News Sources**: 
-  - 매일경제 RSS (수동 업데이트)
+  - 매일경제 RSS (Neo4j 저장)
   - Google RSS (실시간)
 - **Translation**: Google Translate API
-- **Monitoring**: LangSmith (선택적)
+- **Monitoring**: LangSmith
 
 ### 주요 라이브러리
 ```
 langchain==0.3.27
 langgraph==0.6.7
 langchain-google-genai==2.1.12
-chromadb==1.1.0
+pinecone-client>=2.2.0
 py2neo>=2021.2.4
 sentence-transformers>=2.2.0
 yfinance==0.2.66
@@ -761,28 +758,32 @@ feedparser>=6.0.10
 ```bash
 # API Keys
 GOOGLE_API_KEY=your_google_api_key
-LANGSMITH_API_KEY=your_langsmith_api_key (선택)
+OPENAI_API_KEY=your_openai_api_key  # 폴백용
+LANGSMITH_API_KEY=your_langsmith_api_key
 
-# Neo4j 설정
-NEO4J_URI=bolt://localhost:7687
+# Neo4j 설정 (매일경제 뉴스 지식그래프)
+NEO4J_URI=bolt://localhost:7688
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your_password
 
-# ChromaDB 설정
-CHROMA_PERSIST_DIRECTORY=./chroma_db
+# Pinecone 설정 (RAG 벡터 DB)
+PINECONE_API_KEY=your_pinecone_api_key
+PINECONE_INDEX_NAME=finance-rag-index
 
-# 데이터베이스 설정
-DATABASE_URL=sqlite:///./app.db
+# 임베딩 모델
+EMBEDDING_MODEL=kakaobank/kf-deberta-base
 ```
 
 ### Neo4j 설치 및 실행
 
 ```bash
-# Docker로 Neo4j 실행
-docker run -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/password \
+# Docker로 Neo4j 실행 (GDS 플러그인 포함)
+docker run -p 7474:7474 -p 7688:7688 \
+  -e NEO4J_AUTH=neo4j/financial123 \
+  -e NEO4J_PLUGINS='["graph-data-science"]' \
   -v $PWD/neo4j/data:/data \
-  neo4j:latest
+  --name neo4j-finance \
+  neo4j:5.15.0
 
 # 브라우저에서 확인
 http://localhost:7474

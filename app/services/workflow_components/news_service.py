@@ -262,6 +262,7 @@ class NewsService:
         """분석/판단을 위한 매일경제 지식그래프 컨텍스트 생성
         
         ⚠️ 용도: 뉴스가 아닌, 분석 시 배경 지식 제공 (KG 역할)
+        ✨ FallbackAgent 사용
         
         Args:
             query: 분석 대상 쿼리 (한국어)
@@ -271,30 +272,18 @@ class NewsService:
             str: LLM에 제공할 컨텍스트 문자열
         """
         try:
-            print(f"📚 매일경제 KG 컨텍스트 검색 (분석용): {query}")
+            from app.services.langgraph_enhanced.agents import get_news_source_fallback
             
-            # 매일경제 RSS에서 관련 기사 검색 (간단 버전 - Neo4j GDS 없음)
-            kg_articles = await search_mk_news_simple(query, limit=limit)
+            print(f"📚 매일경제 KG 컨텍스트 검색 (분석용, FallbackAgent): {query}")
             
-            if not kg_articles:
-                print(f"⚠️ 매일경제에서 '{query}' 관련 기사 없음")
-                return ""
+            # FallbackAgent를 통한 자동 풀백 실행
+            fallback_helper = get_news_source_fallback()
+            context = await fallback_helper.get_kg_context_with_fallback(query, limit)
             
-            # 컨텍스트 문자열 생성
-            context_parts = ["📚 참고 자료 (매일경제 지식그래프):"]
-            for i, article in enumerate(kg_articles, 1):
-                context_parts.append(f"\n[기사 {i}] {article['title']}")
-                if article.get('summary'):
-                    context_parts.append(f"요약: {article['summary'][:200]}...")
-                context_parts.append(f"출처: {article['link']}")
-                context_parts.append(f"날짜: {article['published']}")
-            
-            context = "\n".join(context_parts)
-            print(f"✅ 매일경제 KG 컨텍스트 생성 완료 ({len(kg_articles)}개 기사)")
             return context
             
         except Exception as e:
-            print(f"❌ 매일경제 KG 컨텍스트 생성 중 오류: {e}")
+            print(f"❌ 매일경제 KG 컨텍스트 생성 중 치명적 오류: {e}")
             import traceback
             traceback.print_exc()
             return ""
@@ -360,6 +349,7 @@ class NewsService:
                                     translate: bool = True,
                                     korean_query: str = None) -> List[Dict[str, Any]]:
         """✨ 종합 뉴스 검색 (매일경제 RSS + Google RSS)
+        ✨ FallbackAgent 사용
         
         전략:
         - 매일경제 RSS (한국어) → korean_query 사용
@@ -375,7 +365,9 @@ class NewsService:
             List[Dict[str, Any]]: 통합된 뉴스 리스트
         """
         try:
-            print(f"📰 실시간 뉴스 검색: {query} (한국어: {korean_query})")
+            from app.services.langgraph_enhanced.agents import get_news_source_fallback
+            
+            print(f"📰 실시간 뉴스 검색 (FallbackAgent): {query}")
             
             all_news = []
             
@@ -383,22 +375,30 @@ class NewsService:
             if query == "오늘 하루 시장 뉴스":
                 return await self.get_today_market_news(limit=10)
             
-            # 1. Google RSS 실시간 뉴스 (번역 포함) - 뉴스 검색 전용
-            if use_google_rss:
-                print(f"  🌐 Google RSS 실시간 검색 및 번역: {query}")
-                google_news = await search_google_news(query, limit=5)
-                all_news.extend(google_news)
+            # FallbackAgent를 통한 자동 풀백 실행
+            fallback_helper = get_news_source_fallback()
             
-            # 2. 기존 RSS (Naver, Daum - 폴백용)
-            if len(all_news) < 3:
-                print("  📡 기존 RSS 검색 (폴백)...")
-                traditional_news = await self.get_financial_news(query)
-                all_news.extend(traditional_news[:3])
+            # Primary 소스 결정
+            primary_source = "google_rss" if use_google_rss else "mk_rss"
             
-            # 3. 중복 제거 (URL 기준 + 제목 유사도)
+            # 뉴스 수집 with 자동 풀백
+            result = await fallback_helper.get_news_with_fallback(
+                query=query,
+                primary_source=primary_source,
+                limit=5
+            )
+            
+            if result['success']:
+                all_news = result['data']
+                print(f"  ✅ 뉴스 수집 성공 (소스: {result['source']}): {len(all_news)}개")
+            else:
+                print(f"  ⚠️ 모든 뉴스 소스 실패")
+                all_news = []
+            
+            # 중복 제거 (URL 기준 + 제목 유사도)
             unique_news = self._remove_duplicates(all_news)
             
-            # 4. 관련도 + 최신순 정렬
+            # 관련도 + 최신순 정렬
             sorted_news = self._sort_news_by_relevance(unique_news, query)
             
             print(f"✅ 실시간 뉴스 검색 결과: {len(sorted_news)}개 (중복 제거 후)")
@@ -406,6 +406,8 @@ class NewsService:
             
         except Exception as e:
             print(f"❌ 뉴스 검색 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def _remove_duplicates(self, news_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

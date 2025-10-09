@@ -6,9 +6,9 @@ RAG, LangChain, LangGraph, LangSmith를 활용한 고급 금융 분석 챗봇 �
 
 ### 1. RAG (Retrieval-Augmented Generation)
 - **금융 지식 베이스**: 포괄적인 금융 지식 문서 저장
-- **벡터 검색**: ChromaDB를 활용한 의미 기반 문서 검색
+- **벡터 검색**: Pinecone을 활용한 의미 기반 문서 검색
 - **실시간 데이터**: Yahoo Finance API를 통한 주식 데이터 조회
-- **한국어 임베딩**: ko-sroberta-multitask 모델 사용
+- **한국어 임베딩**: kakaobank/kf-deberta-base 모델 사용
 
 ### 2. LangChain 에이전트
 - **도구 기반 응답**: 금융 데이터 조회, 분석, 뉴스 검색 도구
@@ -39,7 +39,7 @@ RAG, LangChain, LangGraph, LangSmith를 활용한 고급 금융 분석 챗봇 �
          ▼                       ▼                       ▼
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   RAG Service   │    │   Monitoring    │    │   Knowledge     │
-│   (ChromaDB)    │    │   (LangSmith)   │    │   Base          │
+│   (Pinecone)    │    │   (LangSmith)   │    │   Graph (Neo4j) │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
@@ -51,7 +51,6 @@ BE-LLM/
 │   ├── __init__.py
 │   ├── main.py                 # FastAPI 애플리케이션
 │   ├── config.py              # 설정 관리
-│   ├── database.py            # 데이터베이스 연결
 │   ├── routers/
 │   │   ├── __init__.py
 │   │   └── chat.py            # 채팅 API 라우터
@@ -60,11 +59,10 @@ BE-LLM/
 │   │   └── chat_schema.py     # Pydantic 스키마
 │   └── services/
 │       ├── __init__.py
-│       ├── rag_service.py     # RAG 시스템
+│       ├── pinecone_rag_service.py # Pinecone RAG 시스템
 │       ├── financial_agent.py # LangChain 에이전트
 │       ├── financial_workflow.py # LangGraph 워크플로우
 │       ├── monitoring_service.py # LangSmith 모니터링
-│       ├── knowledge_base_service.py # 지식 베이스 관리
 │       └── chatbot_service.py # 통합 챗봇 서비스
 ├── requirements.txt           # 의존성 패키지
 └── README.md                 # 프로젝트 문서
@@ -81,23 +79,29 @@ pip install -r requirements.txt
 `.env` 파일을 생성하고 다음 변수들을 설정하세요:
 
 ```env
-# OpenAI API Key
-OPENAI_API_KEY=your_openai_api_key_here
-
 # Google AI API Key (Gemini)
 GOOGLE_API_KEY=your_google_api_key_here
 
+# OpenAI API Key (폴백용)
+OPENAI_API_KEY=your_openai_api_key_here
+
 # LangSmith 설정
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
-LANGCHAIN_API_KEY=your_langsmith_api_key_here
-LANGCHAIN_PROJECT=financial-chatbot
+LANGSMITH_TRACING=true
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=your_langsmith_api_key_here
+LANGSMITH_PROJECT=financial-chatbot
 
-# 데이터베이스 설정
-DATABASE_URL=mysql+pymysql://root:password@127.0.0.1/financial_db
+# Neo4j 설정 (매일경제 뉴스 지식그래프)
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_neo4j_password
 
-# 벡터 데이터베이스 설정
-CHROMA_PERSIST_DIRECTORY=./chroma_db
+# Pinecone 설정 (RAG 벡터 DB)
+PINECONE_API_KEY=your_pinecone_api_key_here
+PINECONE_INDEX_NAME=finance-rag-index
+
+# 임베딩 모델
+EMBEDDING_MODEL=kakaobank/kf-deberta-base
 ```
 
 ### 3. 서버 실행
@@ -174,7 +178,8 @@ PER (Price-to-Earnings Ratio)는 주가수익비율을 의미합니다.
 - **LangChain**: LLM 애플리케이션 프레임워크
 - **LangGraph**: 복잡한 워크플로우 관리
 - **LangSmith**: LLM 모니터링 및 디버깅
-- **ChromaDB**: 벡터 데이터베이스
+- **Pinecone**: 클라우드 벡터 데이터베이스 (RAG)
+- **Neo4j**: 그래프 데이터베이스 (지식그래프)
 - **HuggingFace**: 한국어 임베딩 모델
 - **Yahoo Finance**: 실시간 주식 데이터
 - **Pydantic**: 데이터 검증 및 직렬화
