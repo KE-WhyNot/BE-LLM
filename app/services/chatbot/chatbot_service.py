@@ -63,16 +63,9 @@ class FinancialChatbotService:
                 if "chart" in result.get("action_data", {}):
                     chart_image = result["action_data"]["chart"]
                 
-                # Pinecone 검색 결과 가져오기 (Colab 노트북 방식)
+                # Pinecone RAG는 에이전트 내부에서만 사용 (KnowledgeAgent, AnalysisAgent)
+                # 최종 응답에는 포함하지 않음
                 pinecone_results = None
-                try:
-                    # 사용자 메시지로 Pinecone 검색
-                    search_results = self.pinecone_rag_service.search(user_message, top_k=5)
-                    if search_results:
-                        pinecone_results = search_results
-                        print(f"✅ Pinecone에서 {len(search_results)}개 문서 검색 완료")
-                except Exception as e:
-                    print(f"⚠️ Pinecone 검색 중 오류 (무시하고 계속): {e}")
                 
                 return ChatResponse(
                     reply_text=result["reply_text"],
