@@ -1,0 +1,391 @@
+# 포트폴리오 추천용 주식 데이터
+# 각 섹터별 추천 가능한 주식 종목 정보
+
+stocks:
+  # 화학
+  - sector: "화학"
+    name: "DS단석"
+    code: "017860"
+    market_cap: 358717924800
+    characteristics: ["고변동"]
+    current_price: 20400
+    high: 175000
+    low: 20000
+    
+  - sector: "화학"
+    name: "에이피알"
+    code: "278470"
+    market_cap: 9357663750000
+    characteristics: ["고변동", "배당주"]
+    current_price: 258000
+    high: 274500
+    low: 39700
+    
+  - sector: "화학"
+    name: "아모레퍼시픽"
+    code: "090430"
+    market_cap: 7153664425700
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 123100
+    high: 148300
+    low: 99500
+    
+  - sector: "화학"
+    name: "S-OIL우"
+    code: "010955"
+    market_cap: 159871598250
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 39300
+    high: 43450
+    low: 33800
+    
+  # 제약
+  - sector: "제약"
+    name: "오리엔트바이오"
+    code: "002630"
+    market_cap: 68303810880
+    characteristics: ["고변동"]
+    current_price: 578
+    high: 2560
+    low: 408
+    
+  - sector: "제약"
+    name: "신풍제약우"
+    code: "019175"
+    market_cap: 55110000000
+    characteristics: ["고변동"]
+    current_price: 24650
+    high: 55000
+    low: 9650
+    
+  - sector: "제약"
+    name: "삼성바이오로직스"
+    code: "207940"
+    market_cap: 70960478000000
+    characteristics: ["시가총액 상위", "안정"]
+    current_price: 1004500
+    high: 1209000
+    low: 907000
+    
+  - sector: "제약"
+    name: "셀트리온"
+    code: "068270"
+    market_cap: 40044849303600
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 175200
+    high: 202000
+    low: 150400
+    
+  # 전기·전자
+  - sector: "전기·전자"
+    name: "DN오토모티브"
+    code: "007340"
+    market_cap: 1336973265250
+    characteristics: ["고변동", "배당주"]
+    current_price: 22800
+    high: 102100
+    low: 17160
+    
+  - sector: "전기·전자"
+    name: "삼성전자"
+    code: "005930"
+    market_cap: 496657621655800
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 85700
+    high: 86200
+    low: 49900
+    
+  - sector: "전기·전자"
+    name: "SK하이닉스"
+    code: "000660"
+    market_cap: 252980821837500
+    characteristics: ["시가총액 상위", "고변동", "배당주"]
+    current_price: 357500
+    high: 364000
+    low: 157600
+    
+  - sector: "전기·전자"
+    name: "삼성전자우"
+    code: "005935"
+    market_cap: 54180717689600
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 67800
+    high: 68500
+    low: 41700
+    
+  # 운송장비·부품
+  - sector: "운송장비·부품"
+    name: "한화오션"
+    code: "042660"
+    market_cap: 33797397358200
+    characteristics: ["시가총액 상위", "고변동"]
+    current_price: 110100
+    high: 123800
+    low: 26100
+    
+  - sector: "운송장비·부품"
+    name: "평화홀딩스"
+    code: "010770"
+    market_cap: 54845497500
+    characteristics: ["고변동", "배당주"]
+    current_price: 3735
+    high: 16020
+    low: 2355
+    
+  - sector: "운송장비·부품"
+    name: "한화에어로스페이스"
+    code: "012450"
+    market_cap: 57080684907000
+    characteristics: ["시가총액 상위", "고변동", "배당주"]
+    current_price: 1092000
+    high: 1127000
+    low: 270000
+    
+  - sector: "운송장비·부품"
+    name: "HD현대중공업"
+    code: "329180"
+    market_cap: 45718154740000
+    characteristics: ["시가총액 상위", "고변동", "배당주"]
+    current_price: 522000
+    high: 535000
+    low: 168900
+    
+  - sector: "운송장비·부품"
+    name: "현대차"
+    code: "005380"
+    market_cap: 44022919690000
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 215000
+    high: 255500
+    low: 175800
+    
+  - sector: "운송장비·부품"
+    name: "기아"
+    code: "000270"
+    market_cap: 39654579489000
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 100300
+    high: 113200
+    low: 81300
+    
+  # 기타금융
+  - sector: "기타금융"
+    name: "두산2우B"
+    code: "000157"
+    market_cap: 309884186000
+    characteristics: ["고변동", "배당주"]
+    current_price: 361000
+    high: 616000
+    low: 78800
+    
+  - sector: "기타금융"
+    name: "두산우"
+    code: "000155"
+    market_cap: 1396763469000
+    characteristics: ["고변동", "배당주"]
+    current_price: 366000
+    high: 481000
+    low: 76700
+    
+  - sector: "기타금융"
+    name: "KB금융"
+    code: "105560"
+    market_cap: 44058872896500
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 114900
+    high: 126600
+    low: 69300
+    
+  # 기계·장비
+  - sector: "기계·장비"
+    name: "참엔지니어링"
+    code: "009310"
+    market_cap: 21810925655
+    characteristics: ["고변동"]
+    current_price: 1283
+    high: 1800
+    low: 225
+    
+  - sector: "기계·장비"
+    name: "다이나믹디자인"
+    code: "145210"
+    market_cap: 27887793408
+    characteristics: ["고변동"]
+    current_price: 880
+    high: 3760
+    low: 619
+    
+  - sector: "기계·장비"
+    name: "HD현대마린엔진"
+    code: "071970"
+    market_cap: 2812091935500
+    characteristics: ["고변동"]
+    current_price: 87900
+    high: 96200
+    low: 17000
+    
+  - sector: "기계·장비"
+    name: "두산에너빌리티"
+    code: "034020"
+    market_cap: 40163183854200
+    characteristics: ["고변동"]
+    current_price: 64450
+    high: 72200
+    low: 16910
+    
+  # 금속
+  - sector: "금속"
+    name: "영풍"
+    code: "000670"
+    market_cap: 889498347500
+    characteristics: ["고변동", "배당주"]
+    current_price: 45750
+    high: 544000
+    low: 33900
+    
+  - sector: "금속"
+    name: "KBI동양철관"
+    code: "008970"
+    market_cap: 204146817385
+    characteristics: ["고변동"]
+    current_price: 2545
+    high: 3535
+    low: 580
+    
+  - sector: "금속"
+    name: "POSCO 홀딩스"
+    code: "005490"
+    market_cap: 22337494752000
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 274000
+    high: 381500
+    low: 227500
+    
+  - sector: "금속"
+    name: "고려아연"
+    code: "010130"
+    market_cap: 17815145223000
+    characteristics: ["시가총액 상위", "고변동", "배당주"]
+    current_price: 921000
+    high: 2407000
+    low: 643000
+    
+  - sector: "금속"
+    name: "LIG 넥스원"
+    code: "079550"
+    market_cap: 11286000000000
+    characteristics: ["시가총액 상위", "고변동", "배당주"]
+    current_price: 508000
+    high: 650000
+    low: 168800
+    
+  - sector: "금속"
+    name: "현대제철"
+    code: "004020"
+    market_cap: 4530484400750
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 33050
+    high: 38450
+    low: 19900
+    
+  # 건설
+  - sector: "건설"
+    name: "HJ중공업"
+    code: "097230"
+    market_cap: 2331679868000
+    characteristics: ["고변동"]
+    current_price: 28325
+    high: 34350
+    low: 2180
+    
+  - sector: "건설"
+    name: "현대건설"
+    code: "000725"
+    market_cap: 53051057900
+    characteristics: ["시가총액 상위", "고변동", "배당주"]
+    current_price: 50900
+    high: 74500
+    low: 41700
+    
+  - sector: "건설"
+    name: "한전KPS"
+    code: "051600"
+    market_cap: 2144250000000
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 47850
+    high: 65400
+    low: 38000
+    
+  - sector: "건설"
+    name: "GS 건설"
+    code: "006360"
+    market_cap: 1574699416000
+    characteristics: ["안정", "배당주"]
+    current_price: 18440
+    high: 24850
+    low: 15190
+    
+  - sector: "건설"
+    name: "대우 건설"
+    code: "047040"
+    market_cap: 1487929044040
+    characteristics: ["안정"]
+    current_price: 3640
+    high: 4805
+    low: 2940
+    
+  # IT 서비스
+  - sector: "IT 서비스"
+    name: "NAVER"
+    code: "035420"
+    market_cap: 42114933303000
+    characteristics: ["시가총액 상위", "안정", "배당주"]
+    current_price: 255000
+    high: 295000
+    low: 165100
+    
+  - sector: "IT 서비스"
+    name: "카카오"
+    code: "035720"
+    market_cap: 26359620098000
+    characteristics: ["시가총액 상위", "고변동", "배당주"]
+    current_price: 60000
+    high: 71600
+    low: 32550
+    
+  - sector: "IT 서비스"
+    name: "크래프톤"
+    code: "259960"
+    market_cap: 13862594655000
+    characteristics: ["시가총액 상위", "안정"]
+    current_price: 297000
+    high: 393000
+    low: 281000
+    
+  - sector: "IT 서비스"
+    name: "더존비즈온"
+    code: "012510"
+    market_cap: 2701029497600
+    characteristics: ["고변동", "배당주"]
+    current_price: 87900
+    high: 96200
+    low: 44900
+    
+  - sector: "IT 서비스"
+    name: "NHN"
+    code: "181710"
+    market_cap: 911685321000
+    characteristics: ["고변동", "배당주"]
+    current_price: 31675
+    high: 36200
+    low: 15510
+    
+  - sector: "IT 서비스"
+    name: "NICE 평가정보"
+    code: "030190"
+    market_cap: 828926840490
+    characteristics: ["안정", "배당주"]
+    current_price: 13910
+    high: 17700
+    low: 10310
+
