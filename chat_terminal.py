@@ -61,102 +61,77 @@ class ChatTerminal:
             return {"error": f"오류 발생: {str(e)}"}
     
     def display_response(self, response):
-        """응답 표시 (개선 버전)"""
+        """응답 표시 (실제 사용자가 보는 것과 동일 - reply_text만)"""
         if "error" in response:
             print(f"\n❌ 오류: {response['error']}\n")
             return
         
-        print("\n" + "="*60)
-        
-        # Pinecone 검색 결과가 있는 경우 (Colab 노트북 방식으로 표시)
-        if "pinecone_results" in response:
-            pinecone_data = response["pinecone_results"]
-            print(f"📊 검색 결과: {len(pinecone_data)}개")
-            
-            for i, match in enumerate(pinecone_data[:3]):  # 상위 3개만 표시
-                print(f"   [{i+1}] 점수: {match.get('score', 0):.4f}")
-                print(f"       소스: {match.get('metadata', {}).get('source', 'N/A')}")
-                print(f"       내용: {match.get('metadata', {}).get('text', '')[:100]}...")
-                print()
-        
-        # reply_text 우선 (새 API 응답 형식)
+        # 메인 응답 텍스트만 표시 (사용자가 실제로 보는 내용)
         if "reply_text" in response:
-            print(f"🤖 {response['reply_text']}")
-        # response (이전 형식)
+            print(f"\n{response['reply_text']}\n")
         elif "response" in response:
-            print(f"🤖 {response['response']}")
+            print(f"\n{response['response']}\n")
         else:
-            print("🤖 응답을 받았습니다.")
+            print("\n응답을 받았습니다.\n")
             
-        # 차트 이미지
+        # 차트 이미지 알림만
         if response.get("chart_image"):
-            print("\n📊 차트 이미지가 생성되었습니다!")
-        
-        # 추가 정보 (선택적)
-        action_data = response.get("action_data", {})
-        if action_data:
-            if "query_type" in action_data:
-                print(f"\n🔍 쿼리 타입: {action_data['query_type']}")
-            if "workflow_type" in action_data:
-                print(f"🔄 워크플로우: {action_data['workflow_type']}")
-        
-        print("="*60 + "\n")
+            print("📊 차트 이미지가 생성되었습니다!\n")
     
     def show_help(self):
         """도움말 표시"""
         print("\n📖 도움말")
-        print("-" * 30)
-        print("💬 일반 채팅 예시:")
-        print("  - '삼성전자 주가 알려줘'")
-        print("  - 'SK하이닉스 차트 보여줘'")
-        print("  - '네이버 분석해줘'")
-        print("  - '금융 뉴스 알려줘'")
-        print("  - '투자 조언해줘'")
+        print("-" * 50)
+        print("💬 채팅 예시:")
+        print("  📊 주가 조회:")
+        print("    - '삼성전자 주가 알려줘'")
+        print("    - 'SK하이닉스 현재가는?'")
         print()
-        print("🔍 Pinecone DB 검색 예시:")
-        print("  - '바뀐 통화 정책'")
-        print("  - '금리 변화'")
-        print("  - '경제 동향'")
-        print("  - '투자 전략'")
+        print("  📈 투자 분석:")
+        print("    - '네이버 투자 분석해줘'")
+        print("    - '카카오 매수 타이밍인가요?'")
+        print()
+        print("  📰 뉴스 조회:")
+        print("    - '삼성전자 최근 뉴스'")
+        print("    - '반도체 시장 동향'")
+        print()
+        print("  📚 금융 지식:")
+        print("    - 'PER이 뭐야?'")
+        print("    - '배당수익률 설명해줘'")
+        print()
+        print("  📊 차트:")
+        print("    - 'LG전자 차트 보여줘'")
+        print("    - '현대차 주가 그래프'")
         print()
         print("🔧 명령어:")
         print("  - help: 이 도움말 표시")
         print("  - history: 대화 히스토리 표시")
         print("  - clear: 세션 초기화")
         print("  - exit/quit/q: 프로그램 종료")
-        print("-" * 30)
+        print("-" * 50)
     
     def show_history(self):
-        """대화 히스토리 표시 (개선 버전)"""
+        """대화 히스토리 표시"""
         if not self.chat_history:
             print("\n📝 대화 히스토리가 없습니다.\n")
             return
             
         print("\n📝 대화 히스토리")
-        print("=" * 60)
+        print("=" * 70)
         for i, (user_msg, bot_response) in enumerate(self.chat_history, 1):
-            print(f"\n{i}. 👤 질문: {user_msg}")
+            print(f"\n{i}. 👤: {user_msg}")
             
-            # 응답 표시
+            # 응답 표시 (reply_text만)
             if "reply_text" in bot_response:
                 preview = bot_response['reply_text'][:150]
-                print(f"   🤖 응답: {preview}{'...' if len(bot_response['reply_text']) > 150 else ''}")
+                print(f"   🤖: {preview}{'...' if len(bot_response['reply_text']) > 150 else ''}")
             elif "response" in bot_response:
                 preview = bot_response['response'][:150]
-                print(f"   🤖 응답: {preview}{'...' if len(bot_response['response']) > 150 else ''}")
+                print(f"   🤖: {preview}{'...' if len(bot_response['response']) > 150 else ''}")
             elif "error" in bot_response:
                 print(f"   ❌ 오류: {bot_response['error']}")
-            
-            # Pinecone 검색 결과 표시
-            if "pinecone_results" in bot_response and bot_response["pinecone_results"]:
-                print(f"   🔍 Pinecone 검색: {len(bot_response['pinecone_results'])}개 결과")
-            
-            # 추가 정보
-            action_data = bot_response.get("action_data", {})
-            if action_data and "query_type" in action_data:
-                print(f"   📋 타입: {action_data['query_type']}")
         
-        print("=" * 60 + "\n")
+        print("=" * 70 + "\n")
     
     def clear_session(self):
         """세션 초기화"""
