@@ -77,7 +77,7 @@ jobs:
           --region '${{ env.REGION }}' \
           --no-allow-unauthenticated \
           --port 8000 \
-          --memory 2Gi \
+          --memory 4Gi \
           --cpu 2 \
           --timeout 600 \
           --min-instances 1 \
