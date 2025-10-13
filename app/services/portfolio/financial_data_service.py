@@ -1,6 +1,7 @@
 """재무제표 데이터 조회 및 분석 서비스"""
 
 import asyncio
+import time
 from typing import Dict, Any, List, Optional
 from app.services.pinecone_rag_service import search_pinecone, get_context_for_query
 from app.services.pinecone_config import KNOWLEDGE_NAMESPACES
@@ -68,7 +69,7 @@ class FinancialDataService:
         """LLM 초기화"""
         if settings.google_api_key:
             return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.0-flash",
                 temperature=0.2,
                 google_api_key=settings.google_api_key
             )
@@ -82,16 +83,24 @@ class FinancialDataService:
     ) -> Dict[str, Any]:
         """특정 종목의 재무 분석 정보 조회"""
         
+        financial_analysis_start = time.time()
+        
         try:
             print(f"📊 {stock_name} ({stock_code}) 재무 분석 조회...")
             
             # 1. Pinecone에서 재무제표 데이터 검색
+            search_start = time.time()
             financial_data = await self._search_financial_data(stock_code, stock_name)
+            search_time = time.time() - search_start
+            print(f"  🔍 재무 데이터 검색: {search_time:.3f}초 ({len(financial_data) if financial_data else 0}개)")
             
             if not financial_data:
+                total_time = time.time() - financial_analysis_start
+                print(f"⚠️ {stock_name} 재무 데이터 없음, 기본 분석 반환 ({total_time:.3f}초)")
                 return self._get_default_financial_analysis(stock_code, stock_name)
             
             # 2. 투자 성향별 재무지표 분석
+            metrics_start = time.time()
             criteria = self.financial_criteria.get(investment_profile)
             analysis = await self._analyze_financial_metrics(
                 financial_data, 
@@ -99,8 +108,11 @@ class FinancialDataService:
                 stock_name,
                 investment_profile
             )
+            metrics_time = time.time() - metrics_start
+            print(f"  📈 재무지표 분석: {metrics_time:.3f}초")
             
-            return {
+            result_processing_start = time.time()
+            result = {
                 "stock_code": stock_code,
                 "stock_name": stock_name,
                 "investment_profile": investment_profile,
@@ -113,9 +125,17 @@ class FinancialDataService:
                 "data_sources": len(financial_data),
                 "analysis_date": analysis.get("analysis_date", "")
             }
+            result_processing_time = time.time() - result_processing_start
+            print(f"  📋 결과 처리: {result_processing_time:.3f}초")
+            
+            total_time = time.time() - financial_analysis_start
+            print(f"✅ {stock_name} 재무 분석 완료: 점수 {result['financial_score']}/100 ({total_time:.3f}초)")
+            
+            return result
             
         except Exception as e:
-            print(f"❌ {stock_name} 재무 분석 실패: {e}")
+            total_time = time.time() - financial_analysis_start
+            print(f"❌ {stock_name} 재무 분석 실패 ({total_time:.3f}초): {e}")
             return self._get_default_financial_analysis(stock_code, stock_name)
     
     async def _search_financial_data(

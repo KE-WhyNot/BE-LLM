@@ -13,7 +13,7 @@ class LLMManager:
     
     def __init__(self):
         self.llm_cache = {}
-        self.default_model = "gemini-2.0-flash-exp"
+        self.default_model = "gemini-2.0-flash"  # 정식 2.0 버전, 높은 할당량
     
     def get_llm(self, 
                 model_name: Optional[str] = None, 

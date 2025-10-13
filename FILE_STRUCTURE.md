@@ -115,7 +115,7 @@
 ```python
 역할:
 - ChatRequest: user_id, session_id, message
-- ChatResponse: reply_text, action_type, action_data, chart_image, pinecone_results
+- ChatResponse: reply_text, action_type, action_data, chart_image, success, error_message
 
 연결:
 ← app/routers/chat.py (스키마 사용)

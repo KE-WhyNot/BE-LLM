@@ -1,5 +1,6 @@
 """고도화된 포트폴리오 추천 서비스 - 뉴스 분석 + 기업 규모 선호도 반영"""
 
+import time
 from typing import Dict, Any, List
 from datetime import datetime, timezone
 from app.utils.portfolio_stock_loader import portfolio_stock_loader
@@ -10,6 +11,8 @@ from app.schemas.portfolio_schema import (
     StockRecommendation,
     PortfolioRecommendationResult
 )
+from langchain_google_genai import ChatGoogleGenerativeAI
+from app.config import settings
 
 
 class EnhancedPortfolioService:
@@ -36,6 +39,17 @@ class EnhancedPortfolioService:
         
         self.stock_loader = portfolio_stock_loader
         self.sector_analyzer = sector_analysis_service
+        self.llm = self._initialize_llm()
+        
+    def _initialize_llm(self):
+        """LLM 초기화 (동적 추천 이유 생성용)"""
+        if settings.google_api_key:
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash",
+                temperature=0.4,  # 더 창의적인 추천 이유를 위해 온도 상승
+                google_api_key=settings.google_api_key
+            )
+        return None
     
     async def recommend_enhanced_portfolio(
         self, 
@@ -45,23 +59,32 @@ class EnhancedPortfolioService:
     ) -> PortfolioRecommendationResult:
         """최고도화된 포트폴리오 추천 (뉴스 + 재무제표 종합 분석)"""
         
+        total_start_time = time.time()
+        
         print(f"🚀 최고도화된 포트폴리오 추천 시작 (사용자: {profile.userId})")
         print(f"📊 분석 범위: 뉴스({use_news_analysis}) + 재무제표({use_financial_analysis})")
         
         # 1. 기본 자산 배분 결정
+        step1_start = time.time()
         allocation = self.asset_allocation_rules.get(
             profile.investmentProfile,
             self.asset_allocation_rules["위험중립형"]
         )
         base_savings_pct = allocation["예적금"]
         base_stocks_pct = allocation["주식"]
+        step1_time = time.time() - step1_start
+        print(f"⏱️ [단계 1] 기본 자산 배분 결정: {step1_time:.3f}초")
         
         # 2. 관심 섹터 기본 설정
+        step2_start = time.time()
         interested_sectors = profile.interestedSectors
         if not interested_sectors:
             interested_sectors = self._get_default_sectors(profile.investmentProfile)
+        step2_time = time.time() - step2_start
+        print(f"⏱️ [단계 2] 관심 섹터 설정: {step2_time:.3f}초")
         
         # 3. 기업 규모 선호도 결정
+        step3_start = time.time()
         company_size_preference = self.company_size_preferences.get(
             profile.investmentProfile,
             self.company_size_preferences["위험중립형"]
@@ -73,8 +96,11 @@ class EnhancedPortfolioService:
             profile.financialKnowledge,
             profile.lossTolerance
         )
+        step3_time = time.time() - step3_start
+        print(f"⏱️ [단계 3] 기업 규모 선호도 결정: {step3_time:.3f}초")
         
-        # 4. 종목 선정 (종합 분석 기반)
+        # 4. 종목 선정 (종합 분석 기반) - 가장 시간이 많이 걸리는 단계
+        step4_start = time.time()
         recommended_stocks = await self._select_comprehensive_stocks(
             interested_sectors,
             profile.investmentProfile,
@@ -83,12 +109,18 @@ class EnhancedPortfolioService:
             use_news_analysis,
             use_financial_analysis
         )
+        step4_time = time.time() - step4_start
+        print(f"⏱️ [단계 4] 종목 선정 (종합 분석): {step4_time:.3f}초")
         
         # 5. 최종 예적금 비율 계산
+        step5_start = time.time()
         total_stock_allocation = sum(stock.allocationPct for stock in recommended_stocks)  
         final_savings_pct = 100 - total_stock_allocation
+        step5_time = time.time() - step5_start
+        print(f"⏱️ [단계 5] 최종 비율 계산: {step5_time:.3f}초")
         
         # 6. 결과 생성
+        step6_start = time.time()
         now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         
         result = PortfolioRecommendationResult(
@@ -99,6 +131,10 @@ class EnhancedPortfolioService:
             createdAt=now,
             updatedAt=now
         )
+        step6_time = time.time() - step6_start
+        print(f"⏱️ [단계 6] 결과 생성: {step6_time:.3f}초")
+        
+        total_time = time.time() - total_start_time
         
         analysis_type = []
         if use_news_analysis: analysis_type.append("뉴스")
@@ -106,6 +142,9 @@ class EnhancedPortfolioService:
         analysis_desc = " + ".join(analysis_type) if analysis_type else "기본"
         
         print(f"✅ 최고도화된 포트폴리오 추천 완료 ({analysis_desc}): {len(recommended_stocks)}개 종목, 예적금 {final_savings_pct}%")
+        print(f"📊 총 소요 시간: {total_time:.3f}초")
+        print(f"📈 단계 4(종목 선정)가 전체의 {(step4_time/total_time)*100:.1f}% 차지")
+        
         return result
     
     def _calculate_sector_allocations(
@@ -300,8 +339,8 @@ class EnhancedPortfolioService:
                 # 최소 1% 보장
                 allocation_pct = max(1, allocation_pct)
                 
-                # 종합 추천 이유 생성
-                reason = self._generate_comprehensive_reason(
+                # 종합 추천 이유 생성 (LLM 기반)
+                reason = await self._generate_comprehensive_reason(
                     stock=stock,
                     sector=sector,
                     investment_profile=investment_profile,
@@ -417,7 +456,7 @@ class EnhancedPortfolioService:
         
         return full_reason
     
-    def _generate_comprehensive_reason(
+    async def _generate_comprehensive_reason(
         self,
         stock: Dict[str, Any],
         sector: str,
@@ -426,91 +465,443 @@ class EnhancedPortfolioService:
         use_news_analysis: bool = True,
         use_financial_analysis: bool = True
     ) -> str:
-        """뉴스 + 재무제표 종합 추천 이유 생성"""
+        """뉴스 + 재무제표 종합 추천 이유 생성 (LLM 기반 동적 생성)"""
         
         stock_name = stock.get('name', '')
+        stock_code = stock.get('code', '')
         comprehensive_score = analysis.get('comprehensive_score', 50)
         
-        reason_parts = []
+        # LLM을 사용해서 동적 추천 이유 생성
+        if self.llm:
+            try:
+                # 실제 데이터 기반 동적 추천 이유 생성
+                dynamic_reason = await self._generate_dynamic_reason_with_llm(
+                    stock, sector, investment_profile, analysis, 
+                    use_news_analysis, use_financial_analysis
+                )
+                return dynamic_reason
+            except Exception as e:
+                print(f"⚠️ LLM 추천 이유 생성 실패: {e}")
         
-        # 1. 기본 소개 + 종합 평가
+        # 폴백: 기존 템플릿 방식
+        return self._generate_fallback_reason(
+            stock, sector, investment_profile, analysis,
+            use_news_analysis, use_financial_analysis
+        )
+    
+    def _get_stock_characteristics(self, stock_name: str, sector: str, stock_data: Dict[str, Any] = None) -> Dict[str, Any]:
+        """종목별 특성 정보 반환 (우량주, 배당주, 성장주 등)"""
+        
+        characteristics = {
+            "type": "일반주",
+            "features": [],
+            "market_position": "중견기업",
+            "dividend_type": "일반",
+            "advantages": [],
+            "disadvantages": [],
+            "risk_level": "중위험"
+        }
+        
+        # stock_data에서 characteristics 확인 (portfolio_stocks.yaml에서 로드된 데이터)
+        stock_characteristics = []
+        if stock_data and 'characteristics' in stock_data:
+            stock_characteristics = stock_data['characteristics']
+        
+        # 우선배당주 특성 세부 분석
+        if "우선배당주" in stock_characteristics or "우" in stock_name:
+            characteristics["type"] = "우선배당주"
+            characteristics["dividend_type"] = "우선배당"
+            
+            # 우선배당주 고유 장점
+            characteristics["advantages"].extend([
+                "배당 우선권 보장",
+                "안정적인 배당 수익",
+                "일반주 대비 안정성",
+                "하방 리스크 제한적"
+            ])
+            
+            # 우선배당주 고유 단점
+            characteristics["disadvantages"].extend([
+                "의결권 제한",
+                "시세차익 제한적",
+                "유동성 상대적 부족",
+                "상승 탄력성 낮음"
+            ])
+            
+            characteristics["risk_level"] = "저위험"
+            characteristics["market_position"] = "모기업 연동"
+            
+            # 일반주 대비 특성
+            if "안정" in stock_characteristics:
+                characteristics["features"].extend(["안정형 우선배당", "배당 연속성"])
+            if "고변동" in stock_characteristics:
+                characteristics["features"].extend(["변동형 우선배당", "수익 탄력성"])
+                characteristics["risk_level"] = "중위험"
+        
+        # 일반주 특성
+        else:
+            # 대형 우량주
+            if stock_name in ["삼성전자", "SK하이닉스", "NAVER", "카카오"] or "시가총액 상위" in stock_characteristics:
+                characteristics["type"] = "대형 우량주"
+                characteristics["features"].extend(["시장 선도", "안정성"])
+                characteristics["market_position"] = "업계 1위"
+                characteristics["advantages"].extend(["시장 지배력", "브랜드 파워", "재무 안정성"])
+                
+            # 배당주 특성
+            if "배당주" in stock_characteristics:
+                characteristics["features"].append("배당 우량주")
+                characteristics["advantages"].extend(["꾸준한 배당", "현금흐름 안정"])
+                
+            # 성장주 특성
+            if stock_name in ["SK하이닉스", "카카오"] or "성장" in ' '.join(stock_characteristics):
+                characteristics["features"].append("성장주")
+                characteristics["advantages"].extend(["성장 잠재력", "기술 혁신"])
+                characteristics["disadvantages"].extend(["변동성", "밸류에이션 부담"])
+                characteristics["risk_level"] = "중위험"
+            
+        # 섹터별 특성
+        if sector == "전기·전자":
+            characteristics["features"].extend(["기술 혁신", "글로벌 경쟁력"])
+            if characteristics["type"] != "우선배당주":
+                characteristics["disadvantages"].extend(["업황 민감", "기술 경쟁"])
+        elif sector == "IT 서비스":
+            characteristics["features"].extend(["플랫폼 사업", "디지털 전환"])
+            if characteristics["type"] != "우선배당주":
+                characteristics["disadvantages"].extend(["규제 리스크", "경쟁 심화"])
+        elif sector == "기타금융":
+            characteristics["features"].extend(["금리 민감", "경기 연동"])
+            characteristics["advantages"].extend(["금리 상승 수혜", "안정적 사업모델"])
+            
+        # 개별 종목 특성
+        if stock_name == "삼성전자":
+            characteristics["features"].extend(["반도체 강자", "배당 우량주"])
+            characteristics["advantages"].extend(["글로벌 점유율 1위", "기술력"])
+        elif stock_name == "SK하이닉스":
+            characteristics["features"].extend(["메모리 반도체", "성장주"])
+            characteristics["advantages"].extend(["HBM 선도", "AI 수혜"])
+        elif stock_name == "NAVER":
+            characteristics["features"].extend(["검색 포털", "클라우드"])
+            characteristics["advantages"].extend(["국내 검색 독점", "해외 확장"])
+        elif stock_name == "카카오":
+            characteristics["features"].extend(["모바일 플랫폼", "핀테크"])
+            characteristics["advantages"].extend(["생활 플랫폼", "간편결제"])
+            
+        return characteristics
+    
+    async def _generate_dynamic_reason_with_llm(
+        self,
+        stock: Dict[str, Any],
+        sector: str,
+        investment_profile: str,
+        analysis: Dict[str, Any],
+        use_news_analysis: bool,
+        use_financial_analysis: bool
+    ) -> str:
+        """LLM 기반 동적 추천 이유 생성 (실제 뉴스 + 재무 데이터 활용)"""
+        
+        stock_name = stock.get('name', '')
+        stock_code = stock.get('code', '')
+        
+        # 종목 특성 정보 (우선배당주 등)
+        stock_chars = self._get_stock_characteristics(stock_name, sector, stock)
+        
+        # 실제 뉴스 헤드라인과 재무 수치를 더 구체적으로 추출
+        raw_financial = analysis.get('raw_financial_data', {})
+        raw_news = analysis.get('raw_news_data', {})
+        
+        # 🔥 뉴스 헤드라인 직접 추출 (더 구체적)
+        actual_news_headlines = []
+        if raw_news:
+            headlines = raw_news.get('headlines', [])
+            if headlines:
+                actual_news_headlines = headlines[:3]  # 최신 3개 헤드라인
+            
+            # 뉴스 분석 결과
+            news_sentiment = raw_news.get('sentiment_analysis', {})
+            sector_outlook = raw_news.get('sector_outlook', '')
+            market_drivers = raw_news.get('market_drivers', [])
+        
+        # 💰 실제 재무 수치 직접 추출 (더 구체적)
+        actual_financial_metrics = []
+        if raw_financial:
+            # 핵심 재무 지표들
+            revenue_growth = raw_financial.get('revenue_growth', '')
+            profit_margin = raw_financial.get('profit_margin', '')
+            debt_ratio = raw_financial.get('debt_ratio', '')
+            roe = raw_financial.get('roe', '')
+            current_ratio = raw_financial.get('current_ratio', '')
+            
+            # 실제 수치가 있는 것만 포함
+            if revenue_growth:
+                actual_financial_metrics.append(f"매출 성장률 {revenue_growth}")
+            if profit_margin:
+                actual_financial_metrics.append(f"영업이익률 {profit_margin}")
+            if debt_ratio:
+                actual_financial_metrics.append(f"부채비율 {debt_ratio}")
+            if roe:
+                actual_financial_metrics.append(f"ROE {roe}")
+            if current_ratio:
+                actual_financial_metrics.append(f"유동비율 {current_ratio}")
+            
+            # 재무 건전성 평가
+            financial_health = raw_financial.get('financial_health', '')
+            if financial_health:
+                actual_financial_metrics.append(f"재무 건전성: {financial_health}")
+        
+        # 📈 투자자 성향별 맞춤 분석 포인트
+        investor_focus = self._get_investor_focus_points(investment_profile)
+        
+        # 🎯 종합 점수와 세부 평가
+        comprehensive_score = analysis.get('comprehensive_score', 50)
+        news_score = analysis.get('news_score', 50)
+        financial_score = analysis.get('financial_score', 50)
+        
+        # 🔥 투자자 성향별 맞춤형 분석 예시 생성
+        investor_examples = self._get_investor_specific_examples(
+            investment_profile, stock_name, sector, 
+            actual_financial_metrics, actual_news_headlines, comprehensive_score
+        )
+        
+        # 더 구체적이고 동적인 프롬프트 생성
+        prompt = f"""당신은 20년 경력의 포트폴리오 매니저입니다. 아래 실제 데이터를 바탕으로 {stock_name}에 대한 **{investment_profile} 투자자 맞춤형** 구체적 투자 추천 이유를 작성해주세요.
+
+👤 투자자 프로필 심층 분석:
+• 성향: {investment_profile} 
+• 선호 섹터: {sector}
+• 핵심 관심사: {investor_focus}
+• 투자 우선순위: {self._get_investment_priorities(investment_profile)}
+
+📰 실제 뉴스 헤드라인 (최신):
+{chr(10).join([f"• {headline}" for headline in actual_news_headlines[:3]]) if actual_news_headlines else '• 뉴스 분석 진행 중'}
+
+💰 실제 재무 수치 (최근 실적):
+{chr(10).join([f"• {metric}" for metric in actual_financial_metrics[:4]]) if actual_financial_metrics else '• 재무 데이터 수집 중'}
+
+📊 AI 종합 평가:
+• 뉴스 분석 점수: {news_score}/100점 (시장 전망 반영)
+• 재무 분석 점수: {financial_score}/100점 (기업 실적 반영)
+• 종합 투자 점수: {comprehensive_score}/100점
+
+🏢 {stock_name} 종목 특성:
+• 분류: {stock_chars["type"]}
+• 핵심 강점: {' | '.join(stock_chars["advantages"][:2])}
+• 주의 사항: {' | '.join(stock_chars["disadvantages"][:2])}
+
+📋 {investment_profile} 투자자를 위한 분석 예시:
+{investor_examples}
+
+📝 작성 지침 ({investment_profile} 특화):
+1. **실제 뉴스 헤드라인이나 재무 수치를 직접 인용**하여 구체적 근거 제시
+2. **{investment_profile} 투자자가 중요시하는 요소**를 중심으로 논리 전개
+3. 위 예시 스타일을 참고하되 **실제 데이터를 반영한 개별 분석** 제공
+4. {self._get_investor_risk_focus(investment_profile)} 관점에서 리스크 평가
+5. 2-3문장으로 간결하되 **{investment_profile} 투자자에게 특화된 설득력 있는 내용**
+
+🎯 {investment_profile} 투자자를 위한 {stock_name} 추천 이유:"""
+
+        try:
+            response = await self.llm.ainvoke(prompt)
+            reason = response.content.strip()
+            
+            # 응답 품질 검증 및 정제
+            reason = self._refine_llm_response(reason, stock_name, investment_profile)
+            
+            return reason
+            
+        except Exception as e:
+            print(f"⚠️ LLM 추천 이유 생성 중 오류: {e}")
+            return self._generate_fallback_reason(
+                stock, sector, investment_profile, analysis,
+                use_news_analysis, use_financial_analysis
+            )
+    
+    def _get_investor_focus_points(self, investment_profile: str) -> str:
+        """투자자 성향별 중점 관심사 반환"""
+        focus_map = {
+            "안정형": "배당 수익, 원금 보전, 낮은 변동성",
+            "안정추구형": "꾸준한 수익, 브랜드 가치, 안정적 성장",
+            "위험중립형": "균형 잡힌 성장, 적정 밸류에이션, 중장기 전망",
+            "적극투자형": "성장 잠재력, 업계 경쟁력, 혁신 기술",
+            "공격투자형": "고성장 기대, 시장 확대, 파괴적 혁신"
+        }
+        return focus_map.get(investment_profile, "균형 잡힌 투자")
+    
+    def _refine_llm_response(self, response: str, stock_name: str, investment_profile: str) -> str:
+        """LLM 응답 품질 검증 및 정제"""
+        
+        # 기본 정제
+        refined = response.strip()
+        
+        # 불필요한 접두어 제거
+        prefixes_to_remove = [
+            "투자 추천 이유:", "추천 이유:", "🎯 투자 추천 이유:", 
+            "분석 결과:", "결론:", "투자 의견:"
+        ]
+        for prefix in prefixes_to_remove:
+            if refined.startswith(prefix):
+                refined = refined[len(prefix):].strip()
+        
+        # 길이 제한 (너무 긴 경우 핵심 문장만 추출)
+        if len(refined) > 400:
+            sentences = refined.split('. ')
+            if len(sentences) >= 3:
+                # 첫 번째와 마지막 문장 유지
+                refined = sentences[0] + '. ' + sentences[-1]
+                if not refined.endswith('.'):
+                    refined += '.'
+            else:
+                refined = refined[:400] + '...'
+        
+        # 품질 검증: 종목명과 투자자 성향이 언급되었는지 확인
+        has_stock_name = stock_name in refined
+        has_profile_context = any(keyword in refined for keyword in [
+            "안정", "성장", "배당", "수익", "위험", "변동성", "투자"
+        ])
+        
+        # 품질이 낮은 경우 보완
+        if not has_stock_name or not has_profile_context:
+            print(f"⚠️ LLM 응답 품질 낮음, 보완 처리: 종목명({has_stock_name}) 맥락({has_profile_context})")
+            # 기본 정보 추가
+            if not has_stock_name:
+                refined = f"{stock_name}은(는) " + refined
+        
+        return refined
+    
+    def _get_investor_specific_examples(
+        self, 
+        investment_profile: str, 
+        stock_name: str, 
+        sector: str,
+        financial_metrics: List[str],
+        news_headlines: List[str],
+        comprehensive_score: int
+    ) -> str:
+        """투자자 성향별 맞춤형 분석 예시 생성"""
+        
+        # 실제 데이터가 있는 경우 활용
+        sample_metric = financial_metrics[0] if financial_metrics else "매출 성장률 +15.2%"
+        sample_headline = news_headlines[0] if news_headlines else f"[{sector}] 업계 전망 개선세"
+        
+        examples = {
+            "안정형": f"""
+💡 안정형 투자자 분석 예시:
+"삼성전자우는 배당수익률 2.8%와 부채비율 15.3%로 안정적 현금흐름을 제공하며, 최근 '메모리 반도체 수급 개선' 뉴스로 배당 지속성이 더욱 견고해졌으나, 반도체 업황 변동성에 대한 주의가 필요합니다."
+
+📊 안정형 중점 분석 요소:
+• 배당 수익률과 지속성 → 현재 데이터: {sample_metric}
+• 재무 안정성 (부채비율, 현금 보유) 
+• 시장 변동성 대응 능력
+• 업계 뉴스가 배당에 미치는 영향 → 현재 뉴스: {sample_headline}
+""",
+            
+            "안정추구형": f"""
+💡 안정추구형 투자자 분석 예시:
+"NAVER는 ROE 12.4%와 매출성장률 8.7%로 꾸준한 성장세를 보이며, 최근 '클라우드 사업 확장' 발표로 중장기 성장 동력을 확보했으나, 플랫폼 규제 리스크를 지속 모니터링해야 합니다."
+
+📊 안정추구형 중점 분석 요소:
+• 안정적 성장률 (ROE, 매출성장) → 현재 데이터: {sample_metric}
+• 브랜드 가치와 시장 지위
+• 중장기 비즈니스 모델 지속성
+• 성장 관련 뉴스 분석 → 현재 뉴스: {sample_headline}
+""",
+            
+            "위험중립형": f"""
+💡 위험중립형 투자자 분석 예시:
+"SK하이닉스는 PER 18.5배, PBR 1.2배로 적정 밸류에이션을 유지하며, 최근 'HBM 수주 확대' 뉴스로 AI 반도체 수혜주로 재조명받고 있으나, 메모리 업황 사이클을 고려한 진입 타이밍이 중요합니다."
+
+📊 위험중립형 중점 분석 요소:
+• 밸류에이션 지표 (PER, PBR) → 현재 데이터: {sample_metric}  
+• 업종 내 상대적 경쟁력
+• 중장기 성장 vs 단기 리스크 균형
+• 업황 사이클 분석 → 현재 뉴스: {sample_headline}
+""",
+            
+            "적극투자형": f"""
+💡 적극투자형 투자자 분석 예시:
+"카카오는 매출성장률 22.3%와 신사업 투자 확대로 높은 성장 잠재력을 보이며, 최근 'AI 서비스 출시' 뉴스로 테크 혁신 리더십을 강화하고 있으나, 높은 PER 30배에 따른 밸류에이션 부담을 감안해야 합니다."
+
+📊 적극투자형 중점 분석 요소:
+• 고성장 지표 (매출/영업이익 증가율) → 현재 데이터: {sample_metric}
+• 신사업 진출과 혁신 투자
+• 시장 확장 가능성과 경쟁우위
+• 성장 관련 뉴스 모멘텀 → 현재 뉴스: {sample_headline}
+""",
+            
+            "공격투자형": f"""
+💡 공격투자형 투자자 분석 예시:
+"셀트리온은 매출성장률 45.7%와 글로벌 바이오시밀러 시장 진출로 파괴적 성장을 추진하며, 최근 'FDA 신약 승인' 뉴스로 시장 판도 변화를 주도할 잠재력을 보이나, 높은 R&D 투자와 규제 리스크에 대한 높은 리스크 허용도가 필요합니다."
+
+📊 공격투자형 중점 분석 요소:  
+• 파괴적 성장률 (50%+ 성장) → 현재 데이터: {sample_metric}
+• 시장 혁신과 게임 체인저 가능성
+• 글로벌 시장 진출 성과
+• 혁신 관련 뉴스 임팩트 → 현재 뉴스: {sample_headline}
+"""
+        }
+        
+        return examples.get(investment_profile, examples["위험중립형"])
+    
+    def _get_investment_priorities(self, investment_profile: str) -> str:
+        """투자자 성향별 우선순위"""
+        priorities = {
+            "안정형": "배당수익(40%) > 원금보전(35%) > 안정성(25%)",
+            "안정추구형": "안정성장(45%) > 배당수익(30%) > 브랜드가치(25%)",
+            "위험중립형": "균형성장(40%) > 밸류에이션(35%) > 리스크관리(25%)",
+            "적극투자형": "성장잠재력(50%) > 혁신기술(30%) > 시장확장(20%)",
+            "공격투자형": "파괴적혁신(60%) > 시장지배력(25%) > 고성장(15%)"
+        }
+        return priorities.get(investment_profile, "균형 투자")
+    
+    def _get_investor_risk_focus(self, investment_profile: str) -> str:
+        """투자자 성향별 리스크 관점"""
+        risk_focus = {
+            "안정형": "배당 중단/감소 리스크와 원금 손실 가능성",
+            "안정추구형": "꾸준한 성장 둔화와 브랜드 가치 하락",  
+            "위험중립형": "업황 사이클과 밸류에이션 과열",
+            "적극투자형": "성장 모멘텀 실종과 경쟁 열세",
+            "공격투자형": "혁신 실패와 시장 판도 변화"
+        }
+        return risk_focus.get(investment_profile, "일반적인 시장 리스크")
+    
+    def _generate_fallback_reason(
+        self,
+        stock: Dict[str, Any],
+        sector: str,
+        investment_profile: str,
+        analysis: Dict[str, Any],
+        use_news_analysis: bool,
+        use_financial_analysis: bool
+    ) -> str:
+        """폴백용 템플릿 기반 추천 이유 생성"""
+        
+        stock_name = stock.get('name', '')
         investment_rating = analysis.get('investment_rating', '보통')
         risk_level = analysis.get('risk_level', '중위험')
         
-        reason_parts.append(f"{sector} 섹터의 {stock_name}은(는)")
-        reason_parts.append(f"종합 분석 결과 '{investment_rating}' 등급의 {risk_level} 투자처로,")
-        
-        # 2. 재무제표 근거 (활용 시)
-        if use_financial_analysis and analysis:
-            financial_highlights = analysis.get('financial_highlights', [])
-            key_metrics = analysis.get('key_metrics', {})
-            
-            if financial_highlights:
-                reason_parts.append(f"재무적으로 {', '.join(financial_highlights[:2])}의 강점을 보이며,")
-            
-            # 핵심 재무지표 언급
-            if key_metrics:
-                metric_mentions = []
-                for metric, value in list(key_metrics.items())[:2]:  # 상위 2개 지표만
-                    if value and value != "값" and value != "데이터":
-                        metric_mentions.append(f"{metric} {value}")
-                
-                if metric_mentions:
-                    reason_parts.append(f"({', '.join(metric_mentions)})")
-        
-        # 3. 시장 전망 및 뉴스 근거 (활용 시)
-        if use_news_analysis and analysis:
-            market_opportunities = analysis.get('market_opportunities', [])
-            investment_thesis = analysis.get('investment_thesis', '')
-            time_horizon = analysis.get('time_horizon', '중기')
-            
-            # 시장 기회 언급
-            if market_opportunities:
-                reason_parts.append(f"{time_horizon}적으로 {market_opportunities[0]}의 기회가 기대되며,")
-            
-            # 투자 논리 직접 인용 (핵심!)
-            if investment_thesis:
-                # 너무 길면 요약
-                if len(investment_thesis) > 100:
-                    thesis_parts = investment_thesis.split('.')
-                    short_thesis = thesis_parts[0] + '.' if thesis_parts else investment_thesis[:100]
-                    reason_parts.append(f'"{short_thesis}"')
-                else:
-                    reason_parts.append(f'"{investment_thesis}"')
-        
-        # 4. 개인 투자 성향 매칭
-        expected_return = analysis.get('expected_return', '중수익')
-        
-        if investment_profile in ["안정형", "안정추구형"]:
-            if risk_level == "저위험":
-                reason_parts.append("귀하의 안정 추구 성향에 매우 적합한 안전한 투자처입니다.")
+        # 조사 처리
+        def get_josa(word):
+            if not word:
+                return "은"
+            last_char = word[-1]
+            if '가' <= last_char <= '힣':
+                code = ord(last_char) - ord('가')
+                jong = code % 28
+                return "은" if jong != 0 else "는"
+            elif last_char.lower() in 'aeiou' or last_char in '13679':
+                return "는"  
             else:
-                reason_parts.append("포트폴리오 다각화를 위해 신중하게 선정된 종목입니다.")
-                
-        elif investment_profile in ["적극투자형", "공격투자형"]:
-            if expected_return in ["고수익", "중수익"]:
-                reason_parts.append(f"{expected_return} 가능성으로 귀하의 적극적 투자 성향에 부합합니다.")
-            else:
-                reason_parts.append("포트폴리오의 안정성 확보를 위해 포함되었습니다.")
+                return "은"
+        
+        josa = get_josa(stock_name)
+        
+        # 기본 템플릿 추천 이유
+        stock_chars = self._get_stock_characteristics(stock_name, sector, stock)
+        stock_type = stock_chars["type"]
+        
+        if stock_type == "우선배당주":
+            return f"{sector} 섹터의 {stock_name}{josa} 우선배당주로서 안정적인 배당 수익을 제공하는 {investment_rating} 등급의 투자처입니다."
         else:
-            reason_parts.append(f"{expected_return}과 적정 위험 수준의 균형잡힌 투자 옵션입니다.")
-        
-        # 5. 리스크 요인 (중요한 경우 언급)
-        risk_factors = analysis.get('risk_factors', [])
-        if risk_factors and comprehensive_score < 70:
-            main_risk = risk_factors[0]
-            reason_parts.append(f"다만 {main_risk} 요인을 주의 깊게 모니터링할 필요가 있습니다.")
-        
-        # 최종 문장 구성
-        full_reason = " ".join(reason_parts)
-        
-        # 길이 제한 (400자 내외)
-        if len(full_reason) > 400:
-            # 핵심 부분만 유지 (소개 + 핵심 근거 + 결론)
-            core_parts = reason_parts[:2] + reason_parts[-2:]
-            full_reason = " ".join(core_parts)
-        
-        return full_reason
+            return f"{sector} 섹터의 {stock_name}{josa} {investment_rating} 등급의 {risk_level} 투자처로 평가됩니다."
     
     def _get_default_sectors(self, investment_profile: str) -> List[str]:
         """투자 성향별 기본 섹터 반환"""

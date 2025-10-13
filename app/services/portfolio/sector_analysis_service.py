@@ -1,22 +1,25 @@
 """섹터별 뉴스 전망 분석 서비스"""
 
 import asyncio
+import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from app.services.workflow_components.news_service import NewsService
-from app.services.workflow_components.mk_rss_scraper import MKKnowledgeGraphService
+# from app.services.workflow_components.mk_rss_scraper import MKKnowledgeGraphService  # 사용 안함
 from app.services.langgraph_enhanced.agents.news_agent import NewsAgent
+from app.services.portfolio.sector_news_cache_service import sector_news_cache_service
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
 
 
 class SectorAnalysisService:
-    """섹터별 뉴스 분석 및 전망 평가 서비스"""
+    """섹터별 뉴스 분석 및 전망 평가 서비스 (Neo4j 캐싱 적용)"""
     
     def __init__(self):
         self.news_service = NewsService()
-        self.mk_kg_service = MKKnowledgeGraphService()
+        # self.mk_kg_service = MKKnowledgeGraphService()  # 사용 안함 - 속도 최적화
         self.news_agent = NewsAgent()
+        self.cache_service = sector_news_cache_service  # 🔥 Neo4j 캐시 서비스
         self.llm = self._initialize_llm()
         
         # 섹터 키워드 매핑
@@ -47,7 +50,7 @@ class SectorAnalysisService:
         """LLM 초기화"""
         if settings.google_api_key:
             return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.0-flash",
                 temperature=0.3,
                 google_api_key=settings.google_api_key
             )
@@ -56,21 +59,59 @@ class SectorAnalysisService:
     async def analyze_sector_outlook(
         self, 
         sector: str, 
+        time_range: str = "week",
+        use_neo4j: bool = True,
+        fallback_to_realtime: bool = False
+    ) -> Dict[str, Any]:
+        """섹터별 전망 분석 (Neo4j 전용 - RSS 검색 제거)"""
+        
+        sector_start = time.time()
+        
+        # 🚀 Neo4j에서 조회 (Neo4j 전용 모드)
+        neo4j_data = self._get_sector_outlook_from_neo4j(sector)
+        
+        if neo4j_data:
+            total_time = time.time() - sector_start
+            print(f"🎯 {sector} Neo4j 히트! ({total_time:.3f}초)")
+            return neo4j_data
+        
+        # Neo4j에 데이터가 없는 경우
+        print(f"⚠️ {sector} Neo4j에 데이터 없음!")
+        
+        if fallback_to_realtime:
+            # 폴백 허용 시에만 실시간 수집
+            print(f"📊 {sector} 실시간 수집 모드 (느림)...")
+            return await self._realtime_sector_analysis(sector, time_range)
+        else:
+            # 기본: 중립 데이터 반환 및 경고
+            print(f"💡 해결 방법: python build_sector_data.py 실행")
+            return self._get_neutral_outlook(sector)
+    
+    async def _realtime_sector_analysis(
+        self,
+        sector: str,
         time_range: str = "week"
     ) -> Dict[str, Any]:
-        """섹터별 전망 분석"""
+        """실시간 섹터 분석 (폴백용 - 느림)"""
         
         try:
             print(f"📊 {sector} 섹터 전망 분석 시작...")
             
             # 1. 섹터 관련 뉴스 수집
+            news_collect_start = time.time()
             news_data = await self._collect_sector_news(sector, time_range)
+            news_collect_time = time.time() - news_collect_start
+            print(f"  📰 뉴스 수집: {news_collect_time:.3f}초 ({len(news_data) if news_data else 0}개)")
             
             if not news_data:
+                print(f"⚠️ {sector} 뉴스 없음, 중립적 전망 반환")
                 return self._get_neutral_outlook(sector)
             
             # 2. 뉴스 분석 및 전망 평가
+            sentiment_start = time.time()
             outlook_analysis = await self._analyze_news_sentiment(news_data, sector)
+            sentiment_time = time.time() - sentiment_start
+            print(f"  🧠 감정 분석: {sentiment_time:.3f}초")
             
             # 3. 결과 종합
             sector_outlook = {
@@ -82,12 +123,13 @@ class SectorAnalysisService:
                 "key_factors": outlook_analysis.get("key_factors", []),
                 "confidence": outlook_analysis.get("confidence", 0.5),
                 "summary": outlook_analysis.get("summary", ""),
+                "market_impact": outlook_analysis.get("market_impact", ""),
                 "weight_adjustment": self._calculate_weight_adjustment(
                     outlook_analysis.get("sentiment_score", 0)
                 )
             }
             
-            print(f"✅ {sector} 섹터 분석 완료: {sector_outlook['outlook']} (신뢰도: {sector_outlook['confidence']:.2f})")
+            print(f"✅ {sector} 섹터 분석 완료: {sector_outlook['outlook']}")
             return sector_outlook
             
         except Exception as e:
@@ -100,30 +142,19 @@ class SectorAnalysisService:
         keywords = self.sector_keywords.get(sector, [sector])
         all_news = []
         
-        # 각 키워드로 뉴스 검색
+        # 각 키워드로 뉴스 검색 (Google RSS만 사용 - 속도 최적화)
         for keyword in keywords[:2]:  # 상위 2개 키워드만 사용
             try:
-                # 한글 키워드는 매일경제에서, 영문 키워드는 Google RSS에서
-                if any(ord(char) >= 0xAC00 and ord(char) <= 0xD7AF for char in keyword):
-                    # 한글 키워드 - 매일경제 검색
-                    mk_news = await self.mk_kg_service.search_news(
-                        query=keyword, 
-                        limit=3
-                    )
-                    for news in mk_news:
-                        news['source'] = 'mk_rss'
-                        all_news.append(news)
-                else:
-                    # 영문 키워드 - Google RSS 검색
-                    google_news = await self.news_service.get_comprehensive_news(
-                        query=keyword,
-                        use_google_rss=True,
-                        translate=True
-                    )
-                    all_news.extend(google_news[:3])
+                # 모든 키워드를 Google RSS로 직접 검색 (임베딩 검색 스킵)
+                google_news = await self.news_service.get_comprehensive_news(
+                    query=keyword,
+                    use_google_rss=True,
+                    translate=True
+                )
+                all_news.extend(google_news[:3])
                 
-                # API 부하 방지를 위한 딜레이
-                await asyncio.sleep(0.5)
+                # API 부하 방지를 위한 딜레이 (단축)
+                await asyncio.sleep(0.2)
                 
             except Exception as e:
                 print(f"⚠️ {keyword} 뉴스 검색 실패: {e}")
@@ -393,8 +424,60 @@ summary: [투자자 관점에서의 핵심 요약 (2-3문장)]
             "key_factors": ["충분한 뉴스 데이터 없음"],
             "confidence": 0.3,
             "summary": f"{sector} 섹터의 최신 전망 데이터가 부족합니다.",
-            "weight_adjustment": 0.0
+            "weight_adjustment": 0.0,
+            "market_impact": ""
         }
+    
+    def _get_sector_outlook_from_neo4j(self, sector: str) -> Optional[Dict[str, Any]]:
+        """Neo4j에서 섹터 전망 조회 (사전 저장된 데이터)"""
+        
+        neo4j_driver = self.cache_service.driver if hasattr(self.cache_service, 'driver') else None
+        
+        if not neo4j_driver:
+            return None
+        
+        try:
+            with neo4j_driver.session() as session:
+                result = session.run("""
+                    MATCH (so:SectorOutlook {sector_name: $sector})
+                    RETURN so.sector_name AS sector,
+                           so.sentiment_score AS sentiment_score,
+                           so.outlook AS outlook,
+                           so.confidence AS confidence,
+                           so.key_factors AS key_factors,
+                           so.summary AS summary,
+                           so.market_impact AS market_impact,
+                           so.time_horizon AS time_horizon,
+                           so.news_count AS news_count,
+                           so.updated_at AS updated_at
+                    LIMIT 1
+                """, sector=sector)
+                
+                record = result.single()
+                
+                if record:
+                    # weight_adjustment 계산
+                    sentiment_score = record["sentiment_score"] or 0
+                    weight_adjustment = self._calculate_weight_adjustment(sentiment_score)
+                    
+                    return {
+                        "sector": record["sector"],
+                        "sentiment_score": sentiment_score,
+                        "outlook": record["outlook"] or "중립",
+                        "confidence": record["confidence"] or 0.5,
+                        "key_factors": record["key_factors"] or [],
+                        "summary": record["summary"] or "",
+                        "market_impact": record.get("market_impact", ""),
+                        "weight_adjustment": weight_adjustment,
+                        "news_count": record.get("news_count", 0),
+                        "analysis_time": record.get("updated_at", datetime.now(timezone.utc).isoformat())
+                    }
+                else:
+                    return None
+                    
+        except Exception as e:
+            print(f"⚠️ Neo4j 조회 실패: {e}")
+            return None
     
     async def analyze_multiple_sectors(
         self, 
@@ -403,13 +486,19 @@ summary: [투자자 관점에서의 핵심 요약 (2-3문장)]
     ) -> Dict[str, Dict[str, Any]]:
         """여러 섹터 동시 분석"""
         
+        multi_sector_start = time.time()
         print(f"📊 {len(sectors)}개 섹터 전망 분석 시작...")
         
         # 동시 분석 (부하 방지를 위해 3개씩 묶어서 처리)
         results = {}
+        batch_count = (len(sectors) + 2) // 3  # 3개씩 묶은 배치 수
         
         for i in range(0, len(sectors), 3):
+            batch_start = time.time()
             batch_sectors = sectors[i:i+3]
+            batch_num = i // 3 + 1
+            
+            print(f"  🔄 배치 {batch_num}/{batch_count} 처리 중... ({len(batch_sectors)}개 섹터)")
             
             # 배치별 동시 실행
             tasks = [
@@ -426,11 +515,20 @@ summary: [투자자 관점에서의 핵심 요약 (2-3문장)]
                 else:
                     results[sector] = result
             
+            batch_time = time.time() - batch_start
+            print(f"  ✅ 배치 {batch_num} 완료: {batch_time:.3f}초")
+            
             # 배치 간 딜레이
             if i + 3 < len(sectors):
+                print(f"  ⏳ 배치 간 대기: 2초...")
                 await asyncio.sleep(2)
         
-        print(f"✅ 섹터 분석 완료: {len(results)}개")
+        total_time = time.time() - multi_sector_start
+        avg_time_per_sector = total_time / len(sectors) if sectors else 0
+        
+        print(f"✅ 섹터 분석 완료: {len(results)}개, 총 {total_time:.3f}초")
+        print(f"📊 섹터당 평균 분석 시간: {avg_time_per_sector:.3f}초")
+        
         return results
 
 

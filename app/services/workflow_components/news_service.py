@@ -30,7 +30,7 @@ class NewsService:
         """LLM 초기화"""
         if settings.google_api_key:
             return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.0-flash",
                 temperature=0.7,
                 google_api_key=settings.google_api_key
             )

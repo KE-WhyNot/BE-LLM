@@ -9,20 +9,43 @@ class ChatRequest(BaseModel):
 
 # 백엔드에서 프론트엔드로 보내는 응답 형식
 class ChatResponse(BaseModel):
-    reply_text: str # 챗봇의 답변 메시지 (예: "거래내역 화면으로 이동합니다.")
+    reply_text: str # 챗봇의 답변 메시지
     
-    # 프론트엔드가 어떤 행동을 해야할지 알려주는 신호
-    # 'navigate': 페이지 이동, 'display_info': 정보 표시, 'show_chart': 차트 표시 등
-    action_type: str 
+    action_type: str # 프론트엔드 액션 타입 (예: "intelligent_agent_system", "display_info")
     
-    # 행동에 필요한 추가 데이터
-    action_data: Optional[Any] = None 
-    # 예: {'path': '/transactions'} 또는 {'summary': '삼성전자 뉴스 요약...'}
+    action_data: Optional[Any] = None # 액션에 필요한 추가 데이터 (query_analysis, service_plan, confidence_evaluation 등)
     
-    # 차트 이미지 (base64 인코딩, visualization 쿼리 시 사용)
-    chart_image: Optional[str] = None
-    # 예: "iVBORw0KGgoAAAANSUhEUgAA..." (프론트엔드에서 <img src="data:image/png;base64,{chart_image}" />로 표시)
+    chart_image: Optional[str] = None # 차트 이미지 (base64 인코딩)
     
-    # Pinecone 검색 결과 (Colab 노트북 방식으로 표시)
-    pinecone_results: Optional[list] = None
-    # 예: [{"id": "doc1", "score": 0.85, "metadata": {"text": "...", "source": "..."}}]
+    success: bool = True # 요청 성공 여부
+    
+    error_message: Optional[str] = None # 에러 메시지 (에러 발생 시)
+    
+    @staticmethod
+    def create_success(
+        reply_text: str,
+        action_type: str,
+        action_data: Optional[Any] = None,
+        chart_image: Optional[str] = None
+    ):
+        """성공 응답 생성"""
+        return ChatResponse(
+            reply_text=reply_text,
+            action_type=action_type,
+            action_data=action_data,
+            chart_image=chart_image,
+            success=True,
+            error_message=None
+        )
+    
+    @staticmethod
+    def create_error(error_message: str):
+        """에러 응답 생성"""
+        return ChatResponse(
+            reply_text=error_message,
+            action_type="display_info",
+            action_data={"error": True},
+            chart_image=None,
+            success=False,
+            error_message=error_message
+        )
