@@ -34,12 +34,12 @@ class LLMManager:
         cache_key = f"{model_name}_{purpose}_{optimized_params['temperature']}_{hash(str(optimized_params))}"
         if cache_key in self.llm_cache:
             return self.llm_cache[cache_key]
-        
+        '''
         # API 키 확인
         google_api_key = settings.google_api_key
         if not google_api_key:
             raise ValueError("GOOGLE_API_KEY가 설정되지 않았습니다.")
-        
+        '''
         # Gemini LLM 인스턴스 생성
         llm = ChatGoogleGenerativeAI(
             model=model_name,
