@@ -93,8 +93,16 @@ class WorkflowRouter:
         # 시작점 설정
         workflow.set_entry_point("query_analyzer")
         
-        # 쿼리 분석 → 서비스 계획
-        workflow.add_edge("query_analyzer", "service_planner")
+        # 쿼리 분석 → 조건부 라우팅 (단순 쿼리 최적화)
+        workflow.add_conditional_edges(
+            "query_analyzer",
+            self._route_after_query_analysis,
+            {
+                "data_agent": "data_agent",  # 단순 주가 조회
+                "service_planner": "service_planner",  # 복잡한 쿼리
+                "response_agent": "response_agent"  # 일반 인사
+            }
+        )
         
         # 서비스 계획 → 조건부 라우팅 (복잡도 기반)
         workflow.add_conditional_edges(
@@ -248,8 +256,10 @@ class WorkflowRouter:
             first_group = parallel_groups[0]
             if isinstance(first_group, list):
                 # 'data', 'news' -> 'data_agent', 'news_agent'
+                # 'none'이나 빈 값은 제외
                 agents = [f"{agent}_agent" if not agent.endswith('_agent') else agent 
-                         for agent in first_group]
+                         for agent in first_group 
+                         if agent and agent.lower() not in ['none', 'null', '']]
         
         # 만약 추출된 에이전트가 없으면 query_analysis에서 추출
         if not agents:
@@ -661,8 +671,26 @@ class WorkflowRouter:
         return next_agent
     
     def _route_after_query_analysis(self, state: WorkflowState) -> str:
-        """쿼리 분석 후 라우팅"""
-        return state.get("next_agent", "response_agent")
+        """쿼리 분석 후 라우팅 - 단순 쿼리 최적화"""
+        query_analysis = state.get("query_analysis", {})
+        primary_intent = query_analysis.get("primary_intent", "general")
+        complexity = query_analysis.get("complexity_level", "simple")
+        user_query = state["user_query"].lower()
+        
+        # 단순 주가 조회는 바로 data_agent로 (메타 에이전트 건너뛰기)
+        if (primary_intent == "data" and 
+            complexity == "simple" and 
+            any(keyword in user_query for keyword in ["주가", "가격", "시세", "현재가", "stock", "price"])):
+            print(f"⚡ 단순 주가 조회 감지 - 메타 에이전트 건너뛰기")
+            return "data_agent"
+        
+        # 일반 인사는 바로 response_agent로
+        if primary_intent == "general" and any(keyword in user_query for keyword in ["안녕", "hello", "hi"]):
+            print(f"⚡ 일반 인사 감지 - 바로 응답")
+            return "response_agent"
+        
+        # 복잡한 쿼리는 서비스 플래너로
+        return "service_planner"
     
     def _route_after_data(self, state: WorkflowState) -> str:
         """데이터 에이전트 후 라우팅 (투자 질문 감지)"""
@@ -722,7 +750,7 @@ class WorkflowRouter:
             print(f"\n🔍 workflow.invoke 결과 타입: {type(result)}")
             print(f"🔍 result 키: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
             if isinstance(result, dict):
-                print(f"🔍 final_response: '{result.get('final_response', 'NONE')[:100]}'")
+                print(f"🔍 final_response: '{result.get('final_response', 'NONE')[:200]}...'")
                 print(f"🔍 combined_result 있음: {bool(result.get('combined_result'))}")
             
             # 응답 형식 변환

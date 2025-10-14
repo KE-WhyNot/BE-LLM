@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import chat
+from app.routers import chat, portfolio
 from app.config import settings
 
 app = FastAPI(
@@ -20,6 +20,7 @@ app.add_middleware(
 
 # 라우터 포함
 app.include_router(chat.router, prefix="/api/v1")
+app.include_router(portfolio.router)
 
 @app.get("/")
 def read_root():
@@ -40,7 +41,10 @@ def read_root():
             "history": "/api/v1/chat/history/{session_id}",
             "metrics": "/api/v1/chat/metrics",
             "report": "/api/v1/chat/report",
-            "knowledge_base": "/api/v1/chat/knowledge-base/stats"
+            "knowledge_base": "/api/v1/chat/knowledge-base/stats",
+            "portfolio": "/api/v1/portfolio",
+            "portfolio_enhanced": "/api/v1/portfolio/enhanced",
+            "sectors": "/api/v1/portfolio/sectors"
         }
     }
 

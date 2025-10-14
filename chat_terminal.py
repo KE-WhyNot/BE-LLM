@@ -33,13 +33,16 @@ class ChatTerminal:
         print("=" * 50)
         
     def send_message(self, message):
-        """서버에 메시지 전송"""
+        """서버에 메시지 전송 (응답 시간 측정)"""
         try:
             payload = {
                 "message": message,
                 "user_id": self.user_id,
                 "session_id": self.session_id
             }
+            
+            # 시작 시간 기록
+            start_time = datetime.now()
             
             response = requests.post(
                 f"{self.server_url}/api/v1/chat",
@@ -48,10 +51,17 @@ class ChatTerminal:
                 timeout=60  # 타임아웃을 60초로 증가
             )
             
+            # 종료 시간 기록
+            end_time = datetime.now()
+            response_time = (end_time - start_time).total_seconds()
+            
             if response.status_code == 200:
-                return response.json()
+                result = response.json()
+                # 응답 시간 추가
+                result['response_time'] = response_time
+                return result
             else:
-                return {"error": f"서버 오류: {response.status_code}"}
+                return {"error": f"서버 오류: {response.status_code}", "response_time": response_time}
                 
         except requests.exceptions.ConnectionError:
             return {"error": "서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요."}
@@ -63,20 +73,30 @@ class ChatTerminal:
     def display_response(self, response):
         """응답 표시 (실제 사용자가 보는 것과 동일 - reply_text만)"""
         if "error" in response:
-            print(f"\n❌ 오류: {response['error']}\n")
+            print(f"\n❌ 오류: {response['error']}")
+            # 응답 시간 표시
+            if "response_time" in response:
+                print(f"⏱️  응답 시간: {response['response_time']:.2f}초\n")
+            else:
+                print()
             return
         
         # 메인 응답 텍스트만 표시 (사용자가 실제로 보는 내용)
         if "reply_text" in response:
-            print(f"\n{response['reply_text']}\n")
+            print(f"\n{response['reply_text']}")
         elif "response" in response:
-            print(f"\n{response['response']}\n")
+            print(f"\n{response['response']}")
         else:
-            print("\n응답을 받았습니다.\n")
+            print("\n응답을 받았습니다.")
             
         # 차트 이미지 알림만
         if response.get("chart_image"):
-            print("📊 차트 이미지가 생성되었습니다!\n")
+            print("\n📊 차트 이미지가 생성되었습니다!")
+        
+        # 응답 시간 표시
+        if "response_time" in response:
+            response_time = response['response_time']
+            print(f"\n응답 시간: {response_time:.2f}초\n")
     
     def show_help(self):
         """도움말 표시"""

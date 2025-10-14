@@ -58,24 +58,17 @@ class FinancialChatbotService:
             
             # 응답 생성
             if result["success"]:
-                # 차트 이미지가 있는지 확인
-                chart_image = None
-                if "chart" in result.get("action_data", {}):
-                    chart_image = result["action_data"]["chart"]
+                # 차트 이미지 추출 (workflow_router에서 이미 chart_image로 반환)
+                chart_image = result.get("chart_image")
                 
-                # Pinecone RAG는 에이전트 내부에서만 사용 (KnowledgeAgent, AnalysisAgent)
-                # 최종 응답에는 포함하지 않음
-                pinecone_results = None
-                
-                return ChatResponse(
+                return ChatResponse.create_success(
                     reply_text=result["reply_text"],
                     action_type=result["action_type"],
                     action_data=result["action_data"],
-                    chart_image=chart_image,
-                    pinecone_results=pinecone_results
+                    chart_image=chart_image
                 )
             else:
-                return self._create_error_response(result["reply_text"])
+                return ChatResponse.create_error(result["reply_text"])
                 
         except Exception as e:
             error_msg = f"처리 중 오류가 발생했습니다: {str(e)}"
@@ -91,20 +84,7 @@ class FinancialChatbotService:
                 }
             )
             
-            return self._create_error_response(error_msg)
-    
-    
-    
-    def _create_error_response(self, error_message: str) -> ChatResponse:
-        """에러 응답 생성"""
-        return ChatResponse(
-            reply_text=error_message,
-            action_type="display_info",
-            action_data={
-                "error": True,
-                "timestamp": datetime.now().isoformat()
-            }
-        )
+            return ChatResponse.create_error(error_msg)
     
     def get_conversation_history(self, session_id: str) -> list:
         """대화 기록 조회"""
