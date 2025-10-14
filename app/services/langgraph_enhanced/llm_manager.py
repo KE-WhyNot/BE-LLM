@@ -6,6 +6,7 @@ LLM 관리자 (Gemini 2.0 Flash 전용)
 from typing import Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
+from app.utils.common_utils import CacheManager
 
 
 class LLMManager:
@@ -14,6 +15,8 @@ class LLMManager:
     def __init__(self):
         self.llm_cache = {}
         self.default_model = "gemini-2.0-flash"  # 정식 2.0 버전, 높은 할당량
+        # LLM 응답 캐싱 (5분 TTL)
+        self.response_cache = CacheManager(default_ttl=300)
     
     def get_llm(self, 
                 model_name: Optional[str] = None, 
@@ -106,9 +109,33 @@ class LLMManager:
         """기본 Gemini LLM 반환"""
         return self.get_llm(model_name=None, temperature=temperature, purpose=purpose, **kwargs)
     
+    def invoke_with_cache(self, llm: ChatGoogleGenerativeAI, prompt: str, purpose: str = "general") -> str:
+        """LLM 호출 시 캐싱 적용"""
+        import hashlib
+        
+        # 캐시 키 생성 (프롬프트 + 목적 해시)
+        cache_key = hashlib.md5(f"{prompt}_{purpose}".encode()).hexdigest()
+        
+        # 캐시에서 확인
+        cached_response = self.response_cache.get(cache_key)
+        if cached_response:
+            print(f"📦 캐시에서 LLM 응답 반환: {purpose}")
+            return cached_response
+        
+        # LLM 호출
+        response = llm.invoke(prompt)
+        response_text = response.content if hasattr(response, 'content') else str(response)
+        
+        # 캐시에 저장
+        self.response_cache.set(cache_key, response_text)
+        print(f"💾 LLM 응답 캐시 저장: {purpose}")
+        
+        return response_text
+    
     def clear_cache(self):
         """LLM 캐시 초기화"""
         self.llm_cache.clear()
+        self.response_cache.clear()
         print("🧹 LLM 캐시가 초기화되었습니다.")
 
 

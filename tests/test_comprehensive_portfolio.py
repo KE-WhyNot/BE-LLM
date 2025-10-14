@@ -117,7 +117,7 @@ async def test_comprehensive_portfolio_system():
         error_response = {
             "timestamp": timestamp,
             "code": "INTERNAL_ERROR",
-            "message": f"최고도화된 포트폴리오 추천 중 오류가 발생했습니다: {str(e)}"
+            "message": f"포트폴리오 추천 중 오류가 발생했습니다: {str(e)}"
         }
         
         print(json.dumps(error_response, ensure_ascii=False, indent=2))

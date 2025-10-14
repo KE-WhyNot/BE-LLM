@@ -621,10 +621,12 @@ class EnhancedPortfolioService:
             sector_outlook = raw_news.get('sector_outlook', '')
             market_drivers = raw_news.get('market_drivers', [])
         
-        # 💰 실제 재무 수치 직접 추출 (더 구체적)
+        # 💰 실제 재무 수치 직접 추출 (순수 데이터만)
         actual_financial_metrics = []
+        financial_health_status = None
+        
         if raw_financial:
-            # 핵심 재무 지표들
+            # 핵심 재무 지표들 (숫자만)
             revenue_growth = raw_financial.get('revenue_growth', '')
             profit_margin = raw_financial.get('profit_margin', '')
             debt_ratio = raw_financial.get('debt_ratio', '')
@@ -633,20 +635,18 @@ class EnhancedPortfolioService:
             
             # 실제 수치가 있는 것만 포함
             if revenue_growth:
-                actual_financial_metrics.append(f"매출 성장률 {revenue_growth}")
+                actual_financial_metrics.append(f"매출성장률 {revenue_growth}")
             if profit_margin:
                 actual_financial_metrics.append(f"영업이익률 {profit_margin}")
-            if debt_ratio:
-                actual_financial_metrics.append(f"부채비율 {debt_ratio}")
             if roe:
                 actual_financial_metrics.append(f"ROE {roe}")
+            if debt_ratio:
+                actual_financial_metrics.append(f"부채비율 {debt_ratio}")
             if current_ratio:
                 actual_financial_metrics.append(f"유동비율 {current_ratio}")
             
-            # 재무 건전성 평가
-            financial_health = raw_financial.get('financial_health', '')
-            if financial_health:
-                actual_financial_metrics.append(f"재무 건전성: {financial_health}")
+            # 재무 건전성 상태 (별도 변수로)
+            financial_health_status = raw_financial.get('financial_health', '')
         
         # 📈 투자자 성향별 맞춤 분석 포인트
         investor_focus = self._get_investor_focus_points(investment_profile)
@@ -656,48 +656,47 @@ class EnhancedPortfolioService:
         news_score = analysis.get('news_score', 50)
         financial_score = analysis.get('financial_score', 50)
         
-        # 🔥 투자자 성향별 맞춤형 분석 예시 생성
-        investor_examples = self._get_investor_specific_examples(
-            investment_profile, stock_name, sector, 
-            actual_financial_metrics, actual_news_headlines, comprehensive_score
-        )
+        # 재무 상태를 자연스러운 표현으로 변환
+        financial_status_text = ""
+        if financial_health_status:
+            health_map = {
+                "우수": "견고한 재무구조를 갖추고 있으며",
+                "양호": "안정적인 재무상태를 유지하고 있고", 
+                "보통": "무난한 재무지표를 보이고 있으나",
+                "주의": "재무 개선이 필요한 상황이며",
+                "위험": "재무 리스크를 안고 있어"
+            }
+            financial_status_text = health_map.get(financial_health_status, "")
         
         # 더 구체적이고 동적인 프롬프트 생성
-        prompt = f"""당신은 20년 경력의 포트폴리오 매니저입니다. 아래 실제 데이터를 바탕으로 {stock_name}에 대한 **{investment_profile} 투자자 맞춤형** 구체적 투자 추천 이유를 작성해주세요.
+        prompt = f"""당신은 전문 포트폴리오 매니저입니다. 아래 데이터를 바탕으로 {stock_name}에 대한 {investment_profile} 투자자를 위한 추천 이유를 **자연스럽고 전문적인 문장**으로 작성하세요.
 
-👤 투자자 프로필 심층 분석:
-• 성향: {investment_profile} 
-• 선호 섹터: {sector}
-• 핵심 관심사: {investor_focus}
-• 투자 우선순위: {self._get_investment_priorities(investment_profile)}
+【투자자 프로필】
+성향: {investment_profile}
+관심 섹터: {sector}
+투자 목표: {investor_focus}
 
-📰 실제 뉴스 헤드라인 (최신):
-{chr(10).join([f"• {headline}" for headline in actual_news_headlines[:3]]) if actual_news_headlines else '• 뉴스 분석 진행 중'}
+【재무 지표】
+{chr(10).join([f"• {metric}" for metric in actual_financial_metrics[:4]]) if actual_financial_metrics else '• 분석 중'}
+{f"• 전반적으로 {financial_status_text}" if financial_status_text else ''}
 
-💰 실제 재무 수치 (최근 실적):
-{chr(10).join([f"• {metric}" for metric in actual_financial_metrics[:4]]) if actual_financial_metrics else '• 재무 데이터 수집 중'}
+【시장 동향】
+{chr(10).join([f"• {headline}" for headline in actual_news_headlines[:2]]) if actual_news_headlines else '• 뉴스 확인 중'}
 
-📊 AI 종합 평가:
-• 뉴스 분석 점수: {news_score}/100점 (시장 전망 반영)
-• 재무 분석 점수: {financial_score}/100점 (기업 실적 반영)
-• 종합 투자 점수: {comprehensive_score}/100점
+【AI 평가】
+재무 {financial_score}점 | 뉴스 {news_score}점 | 종합 {comprehensive_score}점
 
-🏢 {stock_name} 종목 특성:
-• 분류: {stock_chars["type"]}
-• 핵심 강점: {' | '.join(stock_chars["advantages"][:2])}
-• 주의 사항: {' | '.join(stock_chars["disadvantages"][:2])}
+【종목 특징】
+{stock_chars["type"]} | 강점: {', '.join(stock_chars["advantages"][:2])} | 유의: {', '.join(stock_chars["disadvantages"][:1])}
 
-📋 {investment_profile} 투자자를 위한 분석 예시:
-{investor_examples}
+【작성 규칙】
+1. 위 데이터를 자연스럽게 녹인 2-3문장 작성
+2. "재무 건전성: 보통", "매출 성장률 8%" 같은 딱딱한 표현 금지  
+3. {investment_profile} 투자자에게 의미있는 핵심만 전달
+4. 읽기 쉽고 전문적인 문체 사용
+5. 구체적 조언 제공 (뻔한 말 금지)
 
-📝 작성 지침 ({investment_profile} 특화):
-1. **실제 뉴스 헤드라인이나 재무 수치를 직접 인용**하여 구체적 근거 제시
-2. **{investment_profile} 투자자가 중요시하는 요소**를 중심으로 논리 전개
-3. 위 예시 스타일을 참고하되 **실제 데이터를 반영한 개별 분석** 제공
-4. {self._get_investor_risk_focus(investment_profile)} 관점에서 리스크 평가
-5. 2-3문장으로 간결하되 **{investment_profile} 투자자에게 특화된 설득력 있는 내용**
-
-🎯 {investment_profile} 투자자를 위한 {stock_name} 추천 이유:"""
+추천 이유:"""
 
         try:
             response = await self.llm.ainvoke(prompt)

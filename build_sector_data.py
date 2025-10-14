@@ -43,11 +43,8 @@ async def main():
     print("⏱️  예상 소요 시간: 약 5-10분")
     print()
     
-    # 사용자 확인
-    response = input("계속하시겠습니까? (y/n): ")
-    if response.lower() != 'y':
-        print("❌ 취소되었습니다.")
-        return
+    # 자동 실행 (사용자 확인 생략)
+    print("✅ 자동 실행 모드로 진행합니다...")
     
     # 데이터 수집 & 저장 실행
     await sector_data_builder_service.collect_and_save_all_sector_data(

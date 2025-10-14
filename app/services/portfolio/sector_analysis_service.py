@@ -2,25 +2,27 @@
 
 import asyncio
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from datetime import datetime, timezone
-from app.services.workflow_components.news_service import NewsService
-# from app.services.workflow_components.mk_rss_scraper import MKKnowledgeGraphService  # 사용 안함
-from app.services.langgraph_enhanced.agents.news_agent import NewsAgent
 from app.services.portfolio.sector_news_cache_service import sector_news_cache_service
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
+
+# Lazy imports - 실제 사용할 때만 import
+if TYPE_CHECKING:
+    from app.services.workflow_components.news_service import NewsService
+    from app.services.langgraph_enhanced.agents.news_agent import NewsAgent
 
 
 class SectorAnalysisService:
     """섹터별 뉴스 분석 및 전망 평가 서비스 (Neo4j 캐싱 적용)"""
     
     def __init__(self):
-        self.news_service = NewsService()
-        # self.mk_kg_service = MKKnowledgeGraphService()  # 사용 안함 - 속도 최적화
-        self.news_agent = NewsAgent()
+        # Lazy initialization - 실제 사용할 때만 초기화
+        self._news_service = None
+        self._news_agent = None
+        self._llm = None
         self.cache_service = sector_news_cache_service  # 🔥 Neo4j 캐시 서비스
-        self.llm = self._initialize_llm()
         
         # 섹터 키워드 매핑
         self.sector_keywords = {
@@ -46,15 +48,35 @@ class SectorAnalysisService:
             "decline", "decrease", "deterioration", "negative", "concern", "risk", "volatility"
         ]
     
-    def _initialize_llm(self):
-        """LLM 초기화"""
-        if settings.google_api_key:
-            return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
-                temperature=0.3,
-                google_api_key=settings.google_api_key
-            )
-        return None
+    @property
+    def news_service(self):
+        """NewsService lazy initialization"""
+        if self._news_service is None:
+            print("🔄 NewsService 초기화 중...")
+            from app.services.workflow_components.news_service import NewsService
+            self._news_service = NewsService()
+        return self._news_service
+    
+    @property
+    def news_agent(self):
+        """NewsAgent lazy initialization"""
+        if self._news_agent is None:
+            print("🔄 NewsAgent 초기화 중...")
+            from app.services.langgraph_enhanced.agents.news_agent import NewsAgent
+            self._news_agent = NewsAgent()
+        return self._news_agent
+    
+    @property
+    def llm(self):
+        """LLM lazy initialization"""
+        if self._llm is None:
+            if settings.google_api_key:
+                self._llm = ChatGoogleGenerativeAI(
+                    model="gemini-2.0-flash",
+                    temperature=0.3,
+                    google_api_key=settings.google_api_key
+                )
+        return self._llm
     
     async def analyze_sector_outlook(
         self, 
