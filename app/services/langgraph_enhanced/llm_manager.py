@@ -43,7 +43,7 @@ class LLMManager:
         # Gemini LLM 인스턴스 생성
         llm = ChatGoogleGenerativeAI(
             model=model_name,
-            google_api_key=google_api_key,
+            #google_api_key=google_api_key,
             **optimized_params
         )
         
