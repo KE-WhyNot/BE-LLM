@@ -32,7 +32,8 @@ class NewsService:
             return ChatGoogleGenerativeAI(
                 model="gemini-2.0-flash-exp",
                 temperature=0.7,
-                google_api_key=settings.google_api_key
+                google_api_key=settings.google_api_key,
+                credentials=None  # ADC 비활성화
             )
         return None
     

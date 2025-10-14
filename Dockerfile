@@ -29,6 +29,8 @@ EXPOSE 8000
 # 환경 변수 설정
 ENV PYTHONPATH=/app
 ENV CHROMA_PERSIST_DIRECTORY=/tmp/chroma_db
+# ADC 비활성화 (Cloud Run에서 API 키 사용)
+ENV GOOGLE_APPLICATION_CREDENTIALS=""
 
 # 헬스체크 추가
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
