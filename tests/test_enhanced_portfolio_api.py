@@ -188,8 +188,9 @@ async def test_comparison_basic_vs_enhanced():
     try:
         # 기본 추천
         print("\n🔸 기본 추천:")
-        from app.services.portfolio.portfolio_recommendation_service import portfolio_recommendation_service
-        basic_result = portfolio_recommendation_service.recommend_portfolio(profile)
+        from app.services.portfolio.enhanced_portfolio_service import enhanced_portfolio_service
+        import asyncio
+        basic_result = asyncio.run(enhanced_portfolio_service.recommend_enhanced_portfolio(profile, use_news_analysis=False, use_financial_analysis=False))
         
         print(f"  예적금: {basic_result.allocationSavings}%")
         print("  추천 종목:")

@@ -88,7 +88,7 @@ curl -X POST "${API_URL}/api/v1/portfolio/enhanced" \
 
 echo ""
 echo ""
-echo "[5] 관심 섹터 없는 경우 (기본 섹터 자동 선정)"
+echo "[5] 관심 섹터 없는 경우 (추천 없음, 예적금 100)"
 echo "POST ${API_URL}/api/v1/portfolio/enhanced"
 echo "---"
 curl -X POST "${API_URL}/api/v1/portfolio/enhanced" \

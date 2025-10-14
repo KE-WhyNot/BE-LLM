@@ -55,7 +55,7 @@ async def test_comprehensive_portfolio_system():
         # 포트폴리오 추천 실행
         result = await enhanced_portfolio_service.recommend_enhanced_portfolio(
             profile=test_profile,
-            use_news_analysis=True,
+            use_news_analysis=False,
             use_financial_analysis=True
         )
         

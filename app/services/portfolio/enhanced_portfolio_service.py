@@ -1,6 +1,7 @@
 """고도화된 포트폴리오 추천 서비스 - 뉴스 분석 + 기업 규모 선호도 반영"""
 
 import time
+import unicodedata
 from typing import Dict, Any, List
 from datetime import datetime, timezone
 from app.utils.portfolio_stock_loader import portfolio_stock_loader
@@ -11,6 +12,7 @@ from app.schemas.portfolio_schema import (
     StockRecommendation,
     PortfolioRecommendationResult
 )
+from app.services.portfolio.allocation_utils import now_utc_z, normalize_integer_allocations
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
 
@@ -79,7 +81,7 @@ class EnhancedPortfolioService:
         step2_start = time.time()
         interested_sectors = profile.interestedSectors
         if not interested_sectors:
-            interested_sectors = self._get_default_sectors(profile.investmentProfile)
+            interested_sectors = []  # 사용자 제공 필수, 없으면 주식 추천 비중 0
         step2_time = time.time() - step2_start
         print(f"⏱️ [단계 2] 관심 섹터 설정: {step2_time:.3f}초")
         
@@ -101,27 +103,28 @@ class EnhancedPortfolioService:
         
         # 4. 종목 선정 (종합 분석 기반) - 가장 시간이 많이 걸리는 단계
         step4_start = time.time()
+        # 종목 배분은 주식 내에서 100% 기준으로 정규화 (원그래프 용)
         recommended_stocks = await self._select_comprehensive_stocks(
             interested_sectors,
             profile.investmentProfile,
             company_size_preference,
-            base_stocks_pct,
+            100,
             use_news_analysis,
             use_financial_analysis
         )
         step4_time = time.time() - step4_start
         print(f"⏱️ [단계 4] 종목 선정 (종합 분석): {step4_time:.3f}초")
         
-        # 5. 최종 예적금 비율 계산
+        # 5. 최종 예적금 비율 계산 (주식 원그래프와 독립적으로 규칙 기반 유지)
         step5_start = time.time()
-        total_stock_allocation = sum(stock.allocationPct for stock in recommended_stocks)  
-        final_savings_pct = 100 - total_stock_allocation
+        # 주식 배분은 항상 100으로 정규화되어 반환되며, 예적금 비율은 규칙값 사용
+        final_savings_pct = base_savings_pct
         step5_time = time.time() - step5_start
         print(f"⏱️ [단계 5] 최종 비율 계산: {step5_time:.3f}초")
         
         # 6. 결과 생성
         step6_start = time.time()
-        now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        now = now_utc_z()
         
         result = PortfolioRecommendationResult(
             portfolioId=profile.profileId,
@@ -320,26 +323,18 @@ class EnhancedPortfolioService:
                 for item in all_candidate_stocks[:5]
             ]
         
-        # 3. 비중 배분 (종합 점수 기반)
+        # 3. 비중 배분 (종합 점수 기반, 정수 정규화)
         if selected_candidates:
             total_score = sum(item['comprehensive_score'] for item in selected_candidates)
-            
-            for item in selected_candidates:
+            scores = [item['comprehensive_score'] for item in selected_candidates]
+            # 점수가 모두 0인 경우 균등 분배
+            allocations = normalize_integer_allocations(scores if total_score > 0 else [1]*len(scores), total_stock_pct, min_each=1)
+
+            for (item, allocation_pct) in zip(selected_candidates, allocations):
                 stock = item['stock']
                 analysis = item['analysis']
-                score = item['comprehensive_score']
                 sector = item['sector']
-                
-                # 점수 비례 배분
-                if total_score > 0:
-                    allocation_pct = int((score / total_score) * total_stock_pct)
-                else:
-                    allocation_pct = total_stock_pct // len(selected_candidates)
-                
-                # 최소 1% 보장
-                allocation_pct = max(1, allocation_pct)
-                
-                # 종합 추천 이유 생성 (LLM 기반)
+
                 reason = await self._generate_comprehensive_reason(
                     stock=stock,
                     sector=sector,
@@ -348,7 +343,7 @@ class EnhancedPortfolioService:
                     use_news_analysis=use_news_analysis,
                     use_financial_analysis=use_financial_analysis
                 )
-                
+
                 recommendation = StockRecommendation(
                     stockId=stock['code'],
                     stockName=stock['name'],
@@ -358,13 +353,12 @@ class EnhancedPortfolioService:
                 )
                 recommendations.append(recommendation)
         
-        # 4. 비중 총합 조정 (100% 맞추기)
+        # 4. 비중 총합 검증 (이미 normalize로 맞춰졌지만, 안전망)
         current_total = sum(rec.allocationPct for rec in recommendations)
-        if current_total != total_stock_pct and recommendations:
-            # 가장 높은 비중 종목에서 조정
-            max_recommendation = max(recommendations, key=lambda x: x.allocationPct)
-            adjustment = total_stock_pct - current_total
-            max_recommendation.allocationPct = max(1, max_recommendation.allocationPct + adjustment)
+        if recommendations and current_total != total_stock_pct:
+            # 차이를 가장 큰 비중 종목에서 보정
+            target = max(recommendations, key=lambda x: x.allocationPct)
+            target.allocationPct = max(1, target.allocationPct + (total_stock_pct - current_total))
         
         return recommendations
     
@@ -611,6 +605,8 @@ class EnhancedPortfolioService:
         
         # 🔥 뉴스 헤드라인 직접 추출 (더 구체적)
         actual_news_headlines = []
+        sector_outlook = ""
+        market_drivers = []
         if raw_news:
             headlines = raw_news.get('headlines', [])
             if headlines:
@@ -618,8 +614,8 @@ class EnhancedPortfolioService:
             
             # 뉴스 분석 결과
             news_sentiment = raw_news.get('sentiment_analysis', {})
-            sector_outlook = raw_news.get('sector_outlook', '')
-            market_drivers = raw_news.get('market_drivers', [])
+            sector_outlook = raw_news.get('sector_outlook', '') or raw_news.get('sector_summary', '')
+            market_drivers = raw_news.get('market_drivers', []) or raw_news.get('key_factors', [])
         
         # 💰 실제 재무 수치 직접 추출 (순수 데이터만)
         actual_financial_metrics = []
@@ -680,8 +676,10 @@ class EnhancedPortfolioService:
 {chr(10).join([f"• {metric}" for metric in actual_financial_metrics[:4]]) if actual_financial_metrics else '• 분석 중'}
 {f"• 전반적으로 {financial_status_text}" if financial_status_text else ''}
 
-【시장 동향】
-{chr(10).join([f"• {headline}" for headline in actual_news_headlines[:2]]) if actual_news_headlines else '• 뉴스 확인 중'}
+【시장 동향 및 전망 (Neo4j 기반 분석)】
+• 최신 동향: {chr(10).join([f"  - {headline}" for headline in actual_news_headlines[:2]]) if actual_news_headlines else '분석 중'}
+• 핵심 동력: {', '.join(market_drivers) if market_drivers else '분석 중'}
+• 섹터 전망: {sector_outlook if sector_outlook else '분석 중'}
 
 【AI 평가】
 재무 {financial_score}점 | 뉴스 {news_score}점 | 종합 {comprehensive_score}점
@@ -690,11 +688,12 @@ class EnhancedPortfolioService:
 {stock_chars["type"]} | 강점: {', '.join(stock_chars["advantages"][:2])} | 유의: {', '.join(stock_chars["disadvantages"][:1])}
 
 【작성 규칙】
-1. 위 데이터를 자연스럽게 녹인 2-3문장 작성
-2. "재무 건전성: 보통", "매출 성장률 8%" 같은 딱딱한 표현 금지  
-3. {investment_profile} 투자자에게 의미있는 핵심만 전달
-4. 읽기 쉽고 전문적인 문체 사용
-5. 구체적 조언 제공 (뻔한 말 금지)
+1. '시장 동향 및 전망' 데이터를 활용하여, "~한 동향으로 인해 ~가 예상됩니다." 와 같은 구체적인 문장을 포함하세요.
+2. 위 데이터를 자연스럽게 녹인 2-3문장 작성
+3. "재무 건전성: 보통", "매출 성장률 8%" 같은 딱딱한 표현 금지  
+4. {investment_profile} 투자자에게 의미있는 핵심만 전달
+5. 읽기 쉽고 전문적인 문체 사용
+6. 구체적 조언 제공 (뻔한 말 금지)
 
 추천 이유:"""
 
@@ -764,7 +763,7 @@ class EnhancedPortfolioService:
             if not has_stock_name:
                 refined = f"{stock_name}은(는) " + refined
         
-        return refined
+        return self._normalize_korean_text(refined)
     
     def _get_investor_specific_examples(
         self, 
@@ -897,20 +896,27 @@ class EnhancedPortfolioService:
         stock_chars = self._get_stock_characteristics(stock_name, sector, stock)
         stock_type = stock_chars["type"]
         
-        if stock_type == "우선배당주":
-            return f"{sector} 섹터의 {stock_name}{josa} 우선배당주로서 안정적인 배당 수익을 제공하는 {investment_rating} 등급의 투자처입니다."
-        else:
-            return f"{sector} 섹터의 {stock_name}{josa} {investment_rating} 등급의 {risk_level} 투자처로 평가됩니다."
+        base = (
+            f"{sector} 섹터의 {stock_name}{josa} 우선배당주로서 안정적인 배당 수익을 제공하는 {investment_rating} 등급의 투자처입니다."
+            if stock_type == "우선배당주"
+            else f"{sector} 섹터의 {stock_name}{josa} {investment_rating} 등급의 {risk_level} 투자처로 평가됩니다."
+        )
+        return self._normalize_korean_text(base)
     
     def _get_default_sectors(self, investment_profile: str) -> List[str]:
-        """투자 성향별 기본 섹터 반환"""
-        
-        if investment_profile in ["안정형", "안정추구형"]:
-            return ["전기·전자", "기타금융", "IT 서비스"]
-        elif investment_profile == "위험중립형":
-            return ["전기·전자", "제약", "기타금융"]
-        else:  # 적극투자형, 공격투자형
-            return ["전기·전자", "IT 서비스", "제약"]
+        """사용자 관심 섹터를 반드시 사용하므로 더 이상 기본 섹터를 제공하지 않음"""
+        return []
+
+    def _normalize_korean_text(self, text: str) -> str:
+        """한글 텍스트 정규화 및 깨짐 문자 제거"""
+        if not text:
+            return ""
+        # NFC 정규화로 문자열을 표준 형태로 변환
+        normalized = unicodedata.normalize("NFC", text)
+        # 흔한 깨짐 문자() 제거 및 공백 정리
+        normalized = normalized.replace("", "")
+        normalized = " ".join(normalized.split())
+        return normalized.strip()
 
 
 # 전역 인스턴스
