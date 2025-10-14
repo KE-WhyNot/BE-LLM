@@ -9,7 +9,8 @@ sys.path.insert(0, str(project_root))
 
 from app.schemas.portfolio_schema import InvestmentProfileRequest
 from app.services.portfolio.enhanced_portfolio_service import enhanced_portfolio_service
-from app.services.portfolio.portfolio_recommendation_service import portfolio_recommendation_service
+from app.services.portfolio.enhanced_portfolio_service import enhanced_portfolio_service
+import asyncio
 import json
 
 
@@ -144,7 +145,7 @@ async def test_basic_vs_enhanced():
     
     # V1 기본
     print("\n🔸 V1 기본 추천:")
-    basic_result = portfolio_recommendation_service.recommend_portfolio(profile)
+    basic_result = asyncio.run(enhanced_portfolio_service.recommend_enhanced_portfolio(profile, use_news_analysis=False, use_financial_analysis=False))
     print(f"  예적금: {basic_result.allocationSavings}%")
     print("  종목:")
     for stock in basic_result.recommendedStocks:
