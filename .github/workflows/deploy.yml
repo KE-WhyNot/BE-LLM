@@ -84,6 +84,7 @@ jobs:
           --cpu 2 \
           --timeout 600 \
           --min-instances 1 \
+          --service-account "cloudrun@gen-lang-client-0849634525.iam.gserviceaccount.com" \
           --set-env-vars="OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
           --set-env-vars="LANGSMITH_TRACING=${{ secrets.LANGSMITH_TRACING }}" \
           --set-env-vars="LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}" \
