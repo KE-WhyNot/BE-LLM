@@ -10,7 +10,7 @@ async def handle_chat_request(request: ChatRequest):
     """
     금융 전문가 챗봇과의 대화를 처리합니다.
     RAG, LangChain, LangGraph, LangSmith를 활용한 고급 금융 분석을 제공합니다.
-    복잡도에 따라 자동으로 최적의 워크플로우를 선택합니다.
+    복잡도에 따라 자동으로 최적의 워크플로우를 선택합니다..
     """
     try:
         response = await chatbot_service.process_chat_request(request)
