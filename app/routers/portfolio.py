@@ -7,58 +7,12 @@ from app.schemas.portfolio_schema import (
     PortfolioResponse,
     ErrorResponse
 )
-from app.services.portfolio.portfolio_recommendation_service import portfolio_recommendation_service
 from app.services.portfolio.enhanced_portfolio_service import enhanced_portfolio_service
 
 router = APIRouter(prefix="/api/v1", tags=["portfolio"])
 
 
-@router.post(
-    "/portfolio",
-    response_model=PortfolioResponse,
-    summary="포트폴리오 추천 (기본)",
-    description="사용자 투자 프로필을 기반으로 맞춤형 포트폴리오를 추천합니다. (기본 버전)"
-)
-async def recommend_portfolio(profile: InvestmentProfileRequest):
-    """
-    기본 포트폴리오 추천 API
-    
-    Args:
-        profile: 사용자 투자 프로필 정보
-        
-    Returns:
-        PortfolioResponse: 추천된 포트폴리오 정보
-        
-    Raises:
-        HTTPException: 추천 실패 시
-    """
-    try:
-        # 기본 포트폴리오 추천 서비스 호출
-        result = portfolio_recommendation_service.recommend_portfolio(profile)
-        
-        # 응답 생성
-        response = PortfolioResponse(
-            timestamp=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-            code="SUCCESS",
-            message="포트폴리오 추천 성공",
-            result=result
-        )
-        
-        return response
-        
-    except Exception as e:
-        # 에러 로깅
-        print(f"포트폴리오 추천 오류: {str(e)}")
-        
-        # 에러 응답
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-                "code": "INTERNAL_ERROR",
-                "message": f"포트폴리오 추천 중 오류가 발생했습니다: {str(e)}"
-            }
-        )
+## 기본 포트폴리오 엔드포인트 제거됨: 고도화 서비스만 사용
 
 
 @router.post(

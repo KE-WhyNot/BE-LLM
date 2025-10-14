@@ -8,7 +8,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from app.schemas.portfolio_schema import InvestmentProfileRequest
-from app.services.portfolio.portfolio_recommendation_service import portfolio_recommendation_service
+# 기본 서비스 제거됨: 고도화 서비스만 사용
 from app.utils.portfolio_stock_loader import portfolio_stock_loader
 import json
 
@@ -59,7 +59,9 @@ def test_portfolio_recommendation():
         interestedSectors=["전기·전자", "기타금융", "제약"]
     )
     
-    result1 = portfolio_recommendation_service.recommend_portfolio(profile1)
+    from app.services.portfolio.enhanced_portfolio_service import enhanced_portfolio_service
+    import asyncio
+    result1 = asyncio.run(enhanced_portfolio_service.recommend_enhanced_portfolio(profile1, use_news_analysis=False, use_financial_analysis=False))
     print(f"✓ 예적금 비율: {result1.allocationSavings}%")
     print(f"✓ 추천 종목 ({len(result1.recommendedStocks)}개):")
     for stock in result1.recommendedStocks:
@@ -81,7 +83,7 @@ def test_portfolio_recommendation():
         interestedSectors=["IT 서비스", "전기·전자", "제약"]
     )
     
-    result2 = portfolio_recommendation_service.recommend_portfolio(profile2)
+    result2 = asyncio.run(enhanced_portfolio_service.recommend_enhanced_portfolio(profile2, use_news_analysis=False, use_financial_analysis=False))
     print(f"✓ 예적금 비율: {result2.allocationSavings}%")
     print(f"✓ 추천 종목 ({len(result2.recommendedStocks)}개):")
     for stock in result2.recommendedStocks:
@@ -103,7 +105,7 @@ def test_portfolio_recommendation():
         interestedSectors=[]
     )
     
-    result3 = portfolio_recommendation_service.recommend_portfolio(profile3)
+    result3 = asyncio.run(enhanced_portfolio_service.recommend_enhanced_portfolio(profile3, use_news_analysis=False, use_financial_analysis=False))
     print(f"✓ 예적금 비율: {result3.allocationSavings}%")
     print(f"✓ 추천 종목 ({len(result3.recommendedStocks)}개):")
     for stock in result3.recommendedStocks:
@@ -130,7 +132,7 @@ def test_api_response_format():
         interestedSectors=["전기·전자", "기타금융"]
     )
     
-    result = portfolio_recommendation_service.recommend_portfolio(profile)
+    result = asyncio.run(enhanced_portfolio_service.recommend_enhanced_portfolio(profile, use_news_analysis=False, use_financial_analysis=False))
     
     # JSON으로 변환 테스트
     result_dict = result.model_dump()
