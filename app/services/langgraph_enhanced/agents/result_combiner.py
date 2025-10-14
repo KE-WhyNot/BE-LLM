@@ -18,6 +18,9 @@ class ResultCombinerAgent(BaseAgent):
         """결과 통합 프롬프트 템플릿"""
         return """당신은 여러 소스의 정보를 통합하여 사용자에게 최적의 답변을 제공하는 전문가입니다.
 
+## 오늘 날짜 (반드시 이 날짜를 사용, 임의의 날짜 작성 금지)
+{current_date}
+
 ## 사용자 질문
 "{user_query}"
 
@@ -59,6 +62,13 @@ class ResultCombinerAgent(BaseAgent):
 2. 이모지와 간단한 구조로 가독성 높게 작성하세요.
 3. 정보 출처, 신뢰도 점수, 추가 제안 등의 메타 정보는 포함하지 마세요.
 4. 순수하게 질문에 대한 답변만 제공하세요.
+5. **반드시 수집된 모든 데이터를 상세히 활용하세요** - 간단한 요약이 아닌 구체적인 분석을 제공하세요.
+6. **투자 분석 질문의 경우**: 현재 상황, 투자 의견, 리스크 요인, 주의사항을 모두 포함하세요.
+7. **뉴스 정보가 있으면**: 구체적인 뉴스 내용과 시사점을 포함하세요.
+8. **재무 데이터가 있으면**: PER, PBR, ROE 등 모든 지표를 해석하세요.
+9. CoT를 적극 활용해서 분석을 제공하세요.
+10. **날짜 표기 시 반드시 {current_date}를 사용**하고, 다른 날짜를 추정하거나 생성하지 마세요.
+11. **PER, PBR 값이 제공되면 반드시 본문에 숫자로 포함**하세요.
 
 **포맷 예시**:
 📊 삼성전자 투자 분석
@@ -80,23 +90,33 @@ class ResultCombinerAgent(BaseAgent):
 질문: "삼성전자 투자해도 될까?"
 
 수집 정보:
-- Data: 현재가 71,500원, PER 15.2, PBR 1.3
-- Analysis: 반도체 업황 개선 예상, 목표가 80,000원
+- Data: 현재가 71,500원, PER 15.2, PBR 1.3, ROE 8.5%, 거래량 25M주
+- Analysis: 반도체 업황 개선 예상, 목표가 80,000원, AI 메모리 수요 증가
+- News: 3분기 실적 발표 예정, HBM3 메모리 공급 계약 체결
 
 통합 답변:
 📊 삼성전자 투자 분석
 
 🏢 현재 상황
    현재가: 71,500원 (+2.1%)
-   PER: 15.2, PBR: 1.3 (적정 수준)
+   PER: 15.2배 (업계 평균 18배 대비 저평가)
+   PBR: 1.3배 (적정 수준)
+   ROE: 8.5% (전년 대비 1.2%p 상승)
+   거래량: 2,500만주 (평균 대비 15% 증가)
 
-💡 투자 의견: 매수
+💡 투자 의견: 매수 추천
    반도체 업황 개선이 예상되며, 현재 밸류에이션이 합리적인 수준입니다.
+   AI 메모리 수요 증가로 HBM3 매출 확대가 기대됩니다.
    목표가는 80,000원으로 약 12%의 상승 여력이 있습니다.
+
+📰 최근 동향
+   HBM3 메모리 공급 계약 체결로 AI 반도체 시장 진출 가속화
+   3분기 실적 발표에서 메모리 사업부 회복세 예상
 
 ⚠️ 리스크 요인
    글로벌 경기 둔화 우려
    중국 시장 불확실성
+   메모리 가격 변동성
 
 📌 주의사항: 투자 결정은 본인의 판단과 책임하에 이루어져야 하며, 이 분석은 참고용입니다.
 
@@ -124,9 +144,42 @@ class ResultCombinerAgent(BaseAgent):
 
 📌 주의사항: 투자 결정은 본인의 판단과 책임하에 이루어져야 하며, 이 분석은 참고용입니다.
 
+### 예시 3: 테슬라 투자 분석 (실제 케이스)
+질문: "테슬라 지금 들어가도 될까?"
+
+수집 정보:
+- Data: 현재가 $413.49, PBR 17.24, PER N/A, 거래량 110M주
+- Analysis: 성장/가치/모멘텀 투자 고려, 중간 리스크 수준
+- News: 최신 테슬라 관련 뉴스 2건, AI 자율주행 기술 발전
+
+통합 답변:
+📊 테슬라 투자 분석
+
+🏢 현재 상황
+   현재가: $413.49 (-5.06%)
+   PBR: 17.24배 (매우 높은 수준)
+   PER: N/A (정보 없음)
+   거래량: 1억 1천만주 (평균 대비 높음)
+
+💡 투자 의견: 신중한 검토 필요
+   성장/가치/모멘텀 투자를 고려하는 투자자에게 적합할 수 있습니다.
+   중간 정도의 리스크를 감수할 수 있다면 투자 가능성이 있습니다.
+   하지만 PBR이 매우 높아 밸류에이션 리스크가 큽니다.
+
+📰 최근 동향
+   AI 자율주행 기술 발전으로 미래 성장성 기대
+   전기차 시장 경쟁 심화로 마진 압박 우려
+
+⚠️ 리스크 요인
+   주가 변동성이 매우 높음
+   높은 PBR로 인한 밸류에이션 리스크
+   경쟁사 대비 기술 우위 지속성 불확실
+
+📌 주의사항: 투자 결정은 본인의 판단과 책임하에 이루어져야 하며, 이 분석은 참고용입니다.
+
 ## 지금 통합할 내용
 
-위 형식으로 수집된 정보를 통합하여 응답을 생성하세요."""
+위 형식으로 수집된 정보를 통합하여 응답을 생성하세요. **반드시 모든 수집된 데이터를 상세히 활용하고, 구체적인 분석과 근거를 제시하세요.**"""
     
     def process(
         self, 
@@ -139,10 +192,13 @@ class ResultCombinerAgent(BaseAgent):
             # 수집된 결과 포맷팅
             collected_results = self._format_agent_results(agent_results)
             
-            # 프롬프트 생성
+            # 프롬프트 생성 (현재 날짜 포함)
+            from datetime import datetime
+            current_date = datetime.now().strftime("%Y-%m-%d")
             prompt = self.get_prompt_template().format(
                 user_query=user_query,
-                collected_results=collected_results
+                collected_results=collected_results,
+                current_date=current_date
             )
             
             # LLM 호출
@@ -192,8 +248,9 @@ class ResultCombinerAgent(BaseAgent):
                 if 'financial_data' in result:
                     data = result['financial_data']
                     formatted.append(f"- 주가: {data.get('current_price', 'N/A')}")
-                    formatted.append(f"- PER: {data.get('per', 'N/A')}")
+                    formatted.append(f"- PER: {data.get('pe_ratio', 'N/A')}")
                     formatted.append(f"- PBR: {data.get('pbr', 'N/A')}")
+                    formatted.append(f"- ROE: {data.get('roe', 'N/A')}")
                 
                 if 'analysis_result' in result:
                     formatted.append(f"- 분석: {result['analysis_result'][:200]}...")

@@ -163,6 +163,18 @@ additional_info: [값]"""
             if volume != 'N/A':
                 response_parts.append(f"📊 **거래량**: {volume:,}주" if isinstance(volume, (int, float)) else f"📊 **거래량**: {volume}")
             
+            # PER, PBR 추가
+            pe_ratio = data.get('pe_ratio', 'N/A')
+            pbr = data.get('pbr', 'N/A')
+            roe = data.get('roe', 'N/A')
+            
+            if pe_ratio != 'N/A' and pe_ratio != 'Unknown':
+                response_parts.append(f"📈 **PER**: {pe_ratio}배")
+            if pbr != 'N/A' and pbr != 'Unknown':
+                response_parts.append(f"📊 **PBR**: {pbr}배")
+            if roe != 'N/A' and roe != 'Unknown':
+                response_parts.append(f"💹 **ROE**: {roe}%")
+            
             response_parts.extend([
                 "",
                 "💡 더 자세한 분석이나 차트가 필요하시면 말씀해 주세요!"

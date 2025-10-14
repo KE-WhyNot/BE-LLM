@@ -6,19 +6,23 @@
 
 from typing import List, Dict, Any
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.utils.stock_utils import extract_symbols_for_news
+from app.utils.common_utils import CacheManager
 
 
 class ExternalAPIService:
     """외부 금융 API 호출 서비스"""
     
     def __init__(self):
-        pass
+        # 주가 데이터 캐싱 (1분 TTL)
+        self.stock_cache = CacheManager(default_ttl=60)
+        # 뉴스 데이터 캐싱 (10분 TTL)
+        self.news_cache = CacheManager(default_ttl=600)
     
     def get_stock_data(self, symbol: str, period: str = "1mo") -> Dict[str, Any]:
         """
-        yfinance API를 통한 주식 데이터 조회
+        yfinance API를 통한 주식 데이터 조회 (캐싱 적용)
         
         Args:
             symbol: 주식 심볼 (예: "005930.KS")
@@ -27,6 +31,15 @@ class ExternalAPIService:
         Returns:
             Dict: 주식 데이터 또는 에러 메시지
         """
+        # 캐시 키 생성
+        cache_key = f"stock_{symbol}_{period}"
+        
+        # 캐시에서 확인
+        cached_data = self.stock_cache.get(cache_key)
+        if cached_data:
+            print(f"📦 캐시에서 주가 데이터 반환: {symbol}")
+            return cached_data
+        
         try:
             ticker = yf.Ticker(symbol)
             hist = ticker.history(period=period)
@@ -44,12 +57,42 @@ class ExternalAPIService:
             price_change_percent = (price_change / previous['Close']) * 100
             
             # PER 처리 (trailingPE 없으면 forwardPE 사용)
-            pe_ratio = info.get('trailingPE', 'N/A')
-            if pe_ratio == 'N/A' or pe_ratio is None:
-                pe_ratio = info.get('forwardPE', 'Unknown')
+            pe_ratio = info.get('trailingPE', None)
+            if pe_ratio is None or pe_ratio == 'N/A':
+                pe_ratio = info.get('forwardPE', None)
+                if pe_ratio is not None:
+                    pe_ratio = round(pe_ratio, 2)
+                else:
+                    pe_ratio = 'N/A'
+            else:
+                pe_ratio = round(pe_ratio, 2)
             
-            # PBR 처리
-            pbr = info.get('priceToBook', 'Unknown')
+            # PBR 처리 (priceToBook 없으면 계산)
+            pbr = info.get('priceToBook', None)
+            if pbr is None or pbr == 'N/A':
+                # PBR 계산: 주가 / (주주지분 / 발행주식수)
+                try:
+                    total_debt = info.get('totalDebt', 0)
+                    debt_to_equity = info.get('debtToEquity', 0)
+                    shares_outstanding = info.get('sharesOutstanding', 0)
+                    current_price = latest['Close']
+                    
+                    if total_debt and debt_to_equity and shares_outstanding and current_price:
+                        # 주주지분 = 총부채 / 부채비율
+                        total_equity = total_debt / debt_to_equity
+                        # 주당순자산 = 주주지분 / 발행주식수
+                        book_value_per_share = total_equity / shares_outstanding
+                        # PBR = 주가 / 주당순자산
+                        pbr = current_price / book_value_per_share
+                        pbr = round(pbr, 2)
+                        print(f"📊 PBR 계산: {current_price} / {book_value_per_share:.2f} = {pbr}")
+                    else:
+                        pbr = 'N/A'
+                except Exception as e:
+                    print(f"⚠️ PBR 계산 실패: {e}")
+                    pbr = 'N/A'
+            else:
+                pbr = round(pbr, 2)
             
             # ROE 처리 (백분율로 변환)
             roe = info.get('returnOnEquity', None)
@@ -68,7 +111,7 @@ class ExternalAPIService:
             currency = info.get('currency', 'KRW')  # 기본값: KRW
             currency_symbol = self._get_currency_symbol(currency)
             
-            return {
+            data = {
                 "symbol": symbol,
                 "current_price": round(latest['Close'], 2),
                 "price_change": round(price_change, 2),
@@ -92,6 +135,12 @@ class ExternalAPIService:
                 "currency_symbol": currency_symbol,  # 통화 심볼 ($, ₩ 등)
                 "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M')  # 분까지만 표시
             }
+            
+            # 캐시에 저장
+            self.stock_cache.set(cache_key, data)
+            print(f"💾 주가 데이터 캐시 저장: {symbol}")
+            
+            return data
         except Exception as e:
             return {"error": f"데이터 가져오기 실패: {str(e)}"}
     

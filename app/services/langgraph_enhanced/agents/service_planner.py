@@ -58,7 +58,7 @@ optimization_tips: [최적화 팁]
 ### 예시 1: 단순 데이터 조회
 질문: "삼성전자 주가 알려줘"
 execution_strategy: sequential
-parallel_groups: [[data_agent]]
+parallel_groups: [[data]]
 execution_order: [data_agent, response_agent]
 estimated_time: 1.0
 reasoning: 단순 데이터 조회는 병렬화 불필요
@@ -67,7 +67,7 @@ optimization_tips: 캐시 활용 가능
 ### 예시 2: 투자 분석 요청 (분석 + 뉴스 필수)
 질문: "네이버 지금 투자해도 될까"
 execution_strategy: hybrid
-parallel_groups: [[data_agent], [analysis_agent, news_agent]]
+parallel_groups: [[data], [analysis, news]]
 execution_order: [data_agent, parallel(analysis_agent+news_agent), response_agent]
 estimated_time: 4.0
 reasoning: 투자 판단에는 분석과 최신 뉴스가 필수적이므로 병렬 실행
@@ -76,38 +76,47 @@ optimization_tips: 분석과 뉴스를 동시에 가져와 빠른 응답
 ### 예시 3: 복합 분석 요청
 질문: "네이버 분석과 최근 뉴스 알려줘"
 execution_strategy: hybrid
-parallel_groups: [[data_agent], [news_agent, knowledge_agent]]
+parallel_groups: [[data], [news, knowledge]]
 execution_order: [data_agent, parallel(news_agent+knowledge_agent), analysis_agent, response_agent]
 estimated_time: 3.5
 reasoning: 데이터 조회 후, 뉴스와 지식은 독립적이므로 병렬 실행
 optimization_tips: 뉴스 번역 시간 고려
 
-### 예시 3: 차트/그래프 요청
+### 예시 4: 차트/그래프 요청
 질문: "테슬라 그래프로 보여줘"
 execution_strategy: sequential
-parallel_groups: [[visualization_agent]]
+parallel_groups: [[visualization]]
 execution_order: [visualization_agent, response_agent]
 estimated_time: 2.5
 reasoning: 차트 생성은 단일 서비스로 처리 가능
 optimization_tips: 기간 지정 시 더 빠른 로딩
 
-### 예시 4: 지식 교육
+### 예시 5: 지식 교육
 질문: "PER이 뭐야?"
 execution_strategy: sequential
-parallel_groups: [[knowledge_agent]]
+parallel_groups: [[knowledge]]
 execution_order: [knowledge_agent, response_agent]
 estimated_time: 2.0
 reasoning: 단일 지식 검색은 순차 실행으로 충분
 optimization_tips: RAG 캐시 활용
 
-### 예시 5: 종합 분석
+### 예시 6: 종합 분석
 질문: "삼성전자 투자 분석하고 관련 뉴스와 재무제표 용어 설명해줘"
 execution_strategy: hybrid
-parallel_groups: [[data_agent], [news_agent, knowledge_agent], [analysis_agent]]
+parallel_groups: [[data], [news, knowledge], [analysis]]
 execution_order: [data_agent, parallel(news_agent+knowledge_agent), analysis_agent, response_agent]
 estimated_time: 5.0
 reasoning: 데이터 조회 후 뉴스/지식 병렬 수집, 이후 통합 분석
 optimization_tips: 모든 소스 통합으로 풍부한 답변
+
+### 예시 7: 일반 인사
+질문: "안녕하세요"
+execution_strategy: sequential
+parallel_groups: []
+execution_order: [response_agent]
+estimated_time: 0.5
+reasoning: 단순 인사말에는 별도의 서비스 실행이 필요하지 않습니다.
+optimization_tips: 바로 응답 에이전트로 처리
 
 ## 응답 생성
 다음 형식으로 응답하세요:
