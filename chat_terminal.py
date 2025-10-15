@@ -37,7 +37,7 @@ class ChatTerminal:
         try:
             payload = {
                 "message": message,
-                "user_id": self.user_id,
+                "user_id": str(self.user_id),  # user_id를 문자열로 변환
                 "session_id": self.session_id
             }
             
