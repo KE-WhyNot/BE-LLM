@@ -81,7 +81,8 @@ class EnhancedPortfolioService:
         step2_start = time.time()
         interested_sectors = profile.interestedSectors
         if not interested_sectors:
-            interested_sectors = []  # 사용자 제공 필수, 없으면 주식 추천 비중 0
+            print("⚠️ 사용자 관심 섹터 없음, 투자 성향 기반 기본 섹터 사용")
+            interested_sectors = self._get_default_sectors(profile.investmentProfile)
         step2_time = time.time() - step2_start
         print(f"⏱️ [단계 2] 관심 섹터 설정: {step2_time:.3f}초")
         
@@ -904,8 +905,17 @@ class EnhancedPortfolioService:
         return self._normalize_korean_text(base)
     
     def _get_default_sectors(self, investment_profile: str) -> List[str]:
-        """사용자 관심 섹터를 반드시 사용하므로 더 이상 기본 섹터를 제공하지 않음"""
-        return []
+        """투자 성향에 따라 기본 관심 섹터를 반환"""
+        if investment_profile in ["안정형", "안정추구형"]:
+            # 안정적이고 배당률이 높은 섹터
+            return ["기타금융", "화학"]
+        elif investment_profile == "위험중립형":
+            # 시장 대표 섹터
+            return ["전기·전자", "IT 서비스", "운송장비·부품"]
+        elif investment_profile in ["적극투자형", "공격투자형"]:
+            # 성장성이 높은 기술주 중심 섹터
+            return ["전기·전자", "IT 서비스", "제약"]
+        return ["전기·전자", "IT 서비스"] # 기본값
 
     def _normalize_korean_text(self, text: str) -> str:
         """한글 텍스트 정규화 및 깨짐 문자 제거"""
