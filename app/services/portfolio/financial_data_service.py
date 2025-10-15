@@ -5,6 +5,9 @@ import time
 from typing import Dict, Any, List, Optional
 from app.services.pinecone_rag_service import search_pinecone, get_context_for_query
 from app.services.pinecone_config import KNOWLEDGE_NAMESPACES
+from app.services.langgraph_enhanced.llm_manager import LLMManager
+from app.services.pinecone_rag_service import PineconeRAGService
+from app.schemas.portfolio_schema import InvestmentProfileRequest
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
 
