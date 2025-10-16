@@ -84,6 +84,7 @@ jobs:
           --cpu 8 \
           --timeout 600 \
           --min-instances 1 \
+          --max-instances 5 \
           --service-account "cloudrun@gen-lang-client-0849634525.iam.gserviceaccount.com" \
           --set-env-vars="GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" \
           --set-env-vars="OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
