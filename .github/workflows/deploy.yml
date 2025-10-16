@@ -80,8 +80,8 @@ jobs:
           --region '${{ env.REGION }}' \
           --no-allow-unauthenticated \
           --port 8000 \
-          --memory 4Gi \
-          --cpu 2 \
+          --memory 32Gi \
+          --cpu 8 \
           --timeout 600 \
           --min-instances 1 \
           --service-account "cloudrun@gen-lang-client-0849634525.iam.gserviceaccount.com" \
