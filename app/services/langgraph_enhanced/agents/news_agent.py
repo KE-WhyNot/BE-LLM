@@ -193,12 +193,71 @@ focus_areas: [값]"""
         
         return "\n".join(formatted)
     
+    async def _collect_news_fast_path(self, user_query: str) -> List[Dict[str, Any]]:
+        """Fast-path 뉴스 수집: news_service 직접 호출"""
+        try:
+            from ...workflow_components.news_service import NewsService
+            news_service = NewsService()
+            
+            # 종합 뉴스 서비스 직접 호출
+            news_data = await news_service.get_comprehensive_news(
+                query=user_query,
+                use_google_rss=True,
+                translate=True
+            )
+            
+            print(f"⚡ Fast-path 뉴스 수집 완료: {len(news_data)}개")
+            return news_data
+            
+        except Exception as e:
+            print(f"⚠️ Fast-path 뉴스 수집 실패: {e}")
+            return []
+    
+    def _format_simple_news_response(self, news_data: List[Dict[str, Any]]) -> str:
+        """Fast-path용 간단한 뉴스 응답 포맷"""
+        if not news_data:
+            return "최근 관련 뉴스를 찾을 수 없습니다."
+        
+        response_parts = [f"📰 최근 뉴스 {len(news_data)}건을 찾았습니다:\n"]
+        
+        for i, news in enumerate(news_data[:5], 1):  # 최대 5개만
+            title = news.get('title', '제목 없음')
+            summary = news.get('summary', '요약 없음')
+            source = news.get('source', '출처 없음')
+            published = news.get('published', '날짜 없음')
+            
+            response_parts.append(f"{i}. **{title}**")
+            response_parts.append(f"   📅 {published} | 📰 {source}")
+            response_parts.append(f"   📝 {summary[:100]}{'...' if len(summary) > 100 else ''}")
+            response_parts.append("")
+        
+        return "\n".join(response_parts)
+    
     async def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """뉴스 에이전트 처리 (async)"""
+        """뉴스 에이전트 처리 (async) - Fast-path 지원"""
         try:
             self.log(f"뉴스 수집 시작: {user_query}")
             
-            # LLM이 뉴스 수집 전략 결정
+            # Fast-path 판정: 단순 뉴스 질의
+            primary_intent = query_analysis.get('primary_intent', 'news')
+            complexity = query_analysis.get('complexity_level', 'simple')
+            is_simple_news = (primary_intent == 'news' and complexity == 'simple')
+            
+            if is_simple_news:
+                print("⚡ News Fast-path: 단순 뉴스 질의 감지 - 전략 LLM 생략")
+                # Fast-path: 바로 뉴스 수집
+                news_data = await self._collect_news_fast_path(user_query)
+                if news_data:
+                    simple_response = self._format_simple_news_response(news_data)
+                    return {
+                        'success': True,
+                        'news_data': news_data,
+                        'analysis_result': simple_response,
+                        'fast_path': True,
+                        'skip_result_combiner': True  # 결과 통합 건너뛰기 플래그
+                    }
+            
+            # 일반 경로: LLM이 뉴스 수집 전략 결정
             prompt = self.get_prompt_template().format(
                 user_query=user_query,
                 primary_intent=query_analysis.get('primary_intent', 'news'),

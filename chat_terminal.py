@@ -12,9 +12,10 @@ import sys
 from datetime import datetime
 
 class ChatTerminal:
-    def __init__(self, server_url="http://localhost:8001", user_id=1):
+    def __init__(self, server_url="http://localhost:8001", user_id=1, debug=False):
         self.server_url = server_url
         self.user_id = user_id
+        self.debug = debug
         self.session_id = f"terminal_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.chat_history = []
         
@@ -38,7 +39,8 @@ class ChatTerminal:
             payload = {
                 "message": message,
                 "user_id": str(self.user_id),  # user_id를 문자열로 변환
-                "session_id": self.session_id
+                "session_id": self.session_id,
+                "debug": self.debug
             }
             
             # 시작 시간 기록
@@ -96,7 +98,28 @@ class ChatTerminal:
         # 응답 시간 표시
         if "response_time" in response:
             response_time = response['response_time']
-            print(f"\n응답 시간: {response_time:.2f}초\n")
+            print(f"\n응답 시간: {response_time:.2f}초")
+        
+        # 디버그 정보 표시
+        if self.debug:
+            action = response.get("action_data") or {}
+            if action:
+                print("\n🔎 디버그 메타")
+                print("-" * 50)
+                qa = action.get("query_analysis", {})
+                sp = action.get("service_plan", {})
+                cf = action.get("confidence_evaluation", {})
+                print(f"• intent={qa.get('primary_intent')}, complexity={qa.get('complexity_level') or qa.get('complexity')}")
+                if qa.get('is_investment_question') is not None:
+                    print(f"• is_investment_question={qa.get('is_investment_question')}")
+                if sp:
+                    print(f"• exec_mode={sp.get('execution_mode')}, next={sp.get('next_agent')}, agents={sp.get('agents_to_execute')}")
+                if cf:
+                    print(f"• overall_conf={cf.get('overall_confidence')}")
+                print(f"• workflow_type={action.get('workflow_type')}")
+                print("-" * 50)
+        
+        print()
     
     def show_help(self):
         """도움말 표시"""
@@ -211,6 +234,8 @@ def main():
                        help='서버 URL (기본값: http://localhost:8001)')
     parser.add_argument('--user-id', '-u', type=int, default=1,
                        help='사용자 ID (기본값: 1)')
+    parser.add_argument('--debug', '-d', action='store_true',
+                       help='디버그 메타 정보 출력')
     
     args = parser.parse_args()
     
@@ -219,7 +244,7 @@ def main():
     os.environ['LANGCHAIN_TRACING_V2'] = 'true'
     
     try:
-        chat = ChatTerminal(args.server, args.user_id)
+        chat = ChatTerminal(args.server, args.user_id, debug=args.debug)
         chat.run()
     except Exception as e:
         print(f"❌ 프로그램 실행 오류: {e}")

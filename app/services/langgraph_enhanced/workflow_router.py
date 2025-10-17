@@ -93,12 +93,14 @@ class WorkflowRouter:
         # 시작점 설정
         workflow.set_entry_point("query_analyzer")
         
-        # 쿼리 분석 → 조건부 라우팅 (단순 쿼리 최적화)
+        # 쿼리 분석 → 조건부 라우팅 (Fast-path 지원)
         workflow.add_conditional_edges(
             "query_analyzer",
             self._route_after_query_analysis,
             {
                 "data_agent": "data_agent",  # 단순 주가 조회
+                "news_agent": "news_agent",  # Fast-path: 단순 뉴스 질의
+                "knowledge_agent": "knowledge_agent",  # Fast-path: 단순 지식 질의
                 "service_planner": "service_planner",  # 복잡한 쿼리
                 "response_agent": "response_agent"  # 일반 인사
             }
@@ -135,10 +137,24 @@ class WorkflowRouter:
             }
         )
         
-        # 다른 전문 에이전트들 → 결과 통합
+        # 다른 전문 에이전트들 → 조건부 라우팅 (Fast-path 지원)
+        workflow.add_conditional_edges(
+            "news_agent",
+            self._route_after_news,
+            {
+                "result_combiner": "result_combiner",  # 일반 경로
+                "response_agent": "response_agent"     # Fast-path
+            }
+        )
+        workflow.add_conditional_edges(
+            "knowledge_agent",
+            self._route_after_knowledge,
+            {
+                "result_combiner": "result_combiner",  # 일반 경로
+                "response_agent": "response_agent"     # Fast-path
+            }
+        )
         workflow.add_edge("analysis_agent", "result_combiner")
-        workflow.add_edge("news_agent", "result_combiner")
-        workflow.add_edge("knowledge_agent", "result_combiner")
         workflow.add_edge("visualization_agent", "result_combiner")
         
         # 결과 통합 → 신뢰도 계산
@@ -671,11 +687,23 @@ class WorkflowRouter:
         return next_agent
     
     def _route_after_query_analysis(self, state: WorkflowState) -> str:
-        """쿼리 분석 후 라우팅 - 단순 쿼리 최적화"""
+        """쿼리 분석 후 라우팅 - Fast-path 지원"""
         query_analysis = state.get("query_analysis", {})
         primary_intent = query_analysis.get("primary_intent", "general")
         complexity = query_analysis.get("complexity_level", "simple")
         user_query = state["user_query"].lower()
+        
+        print(f"🔍 라우팅 디버그: intent={primary_intent}, complexity={complexity}, query='{user_query}'")
+        
+        # Fast-path: 단순 뉴스 질의 (조건 완화)
+        if (primary_intent == "news" and complexity == "simple"):
+            print(f"⚡ News Fast-path: 단순 뉴스 질의 감지 - 메타 에이전트 건너뛰기")
+            return "news_agent"
+        
+        # Fast-path: 단순 지식 질의 (조건 완화)
+        if (primary_intent == "knowledge" and complexity == "simple"):
+            print(f"⚡ Knowledge Fast-path: 단순 지식 질의 감지 - 메타 에이전트 건너뛰기")
+            return "knowledge_agent"
         
         # 단순 주가 조회는 바로 data_agent로 (메타 에이전트 건너뛰기)
         if (primary_intent == "data" and 
@@ -691,6 +719,39 @@ class WorkflowRouter:
         
         # 복잡한 쿼리는 서비스 플래너로
         return "service_planner"
+    
+    def _route_after_news(self, state: WorkflowState) -> str:
+        """뉴스 에이전트 후 라우팅 - Fast-path 지원"""
+        # Fast-path 플래그 확인
+        news_data = state.get("news_data", [])
+        analysis_result = state.get("analysis_result", "")
+        
+        print(f"🔍 News 라우팅 디버그: news_data={len(news_data)}, analysis_result={bool(analysis_result)}")
+        
+        # Fast-path 조건: 뉴스 데이터와 분석 결과가 모두 있으면
+        if news_data and analysis_result:
+            print(f"⚡ News Fast-path 완료 - 결과 통합 건너뛰기")
+            return "response_agent"
+        
+        # 일반 경로는 결과 통합으로
+        print(f"📋 News 일반 경로 - 결과 통합으로")
+        return "result_combiner"
+    
+    def _route_after_knowledge(self, state: WorkflowState) -> str:
+        """지식 에이전트 후 라우팅 - Fast-path 지원"""
+        # Fast-path 결과 확인
+        knowledge_context = state.get("knowledge_context", "")
+        
+        print(f"🔍 Knowledge 라우팅 디버그: knowledge_context={bool(knowledge_context)}")
+        
+        # Fast-path 조건: 지식 컨텍스트가 있으면
+        if knowledge_context:
+            print(f"⚡ Knowledge Fast-path 완료 - 결과 통합 건너뛰기")
+            return "response_agent"
+        
+        # 일반 경로는 결과 통합으로
+        print(f"📋 Knowledge 일반 경로 - 결과 통합으로")
+        return "result_combiner"
     
     def _route_after_data(self, state: WorkflowState) -> str:
         """데이터 에이전트 후 라우팅 (투자 질문 감지)"""
