@@ -30,10 +30,6 @@ EXPOSE 8000
 ENV PYTHONPATH=/app
 ENV CHROMA_PERSIST_DIRECTORY=/tmp/chroma_db
 
-# 헬스체크 추가
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
 # 애플리케이션 실행
 # CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
 CMD ["/bin/sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

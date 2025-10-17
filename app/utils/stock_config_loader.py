@@ -13,18 +13,29 @@ from pathlib import Path
 class StockConfigLoader:
     """주식 설정 로더 클래스"""
     
-    def __init__(self, config_path: str = "config/stocks.yaml"):
-        """
-        주식 설정 로더 초기화
+    _instance = None
+    _initialized = False
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self, config_path: str = None):
+        if self._initialized:
+            return
         
-        Args:
-            config_path: YAML 설정 파일 경로
-        """
+        if config_path is None:
+            # 프로젝트 루트를 기준으로 경로 설정
+            base_dir = Path(__file__).resolve().parent.parent.parent
+            config_path = base_dir / "config" / "stocks.yaml"
+
         self.config_path = config_path
         self._config = None
         self._stock_mapping = {}
         self._symbol_mapping = {}
         self._load_config()
+        self._initialized = True
     
     def _load_config(self):
         """YAML 설정 파일 로드"""

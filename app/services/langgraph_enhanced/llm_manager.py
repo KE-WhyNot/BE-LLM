@@ -67,7 +67,7 @@ class LLMManager:
         google_api_key = settings.google_api_key
         if not google_api_key:
             raise ValueError("GOOGLE_API_KEY가 설정되지 않았습니다.")
-        
+
         # Gemini LLM 인스턴스 생성
         llm = ChatGoogleGenerativeAI(
             model=model_name,

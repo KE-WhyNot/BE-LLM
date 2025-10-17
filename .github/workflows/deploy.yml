@@ -41,6 +41,9 @@ jobs:
   #     run: |
   #       pytest -q tests/_smoke_test.py
 
+  #   --set-env-vars="GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" \
+
+
   build-and-deploy:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -77,10 +80,12 @@ jobs:
           --region '${{ env.REGION }}' \
           --no-allow-unauthenticated \
           --port 8000 \
-          --memory 2Gi \
-          --cpu 2 \
+          --memory 32Gi \
+          --cpu 8 \
           --timeout 600 \
           --min-instances 1 \
+          --max-instances 5 \
+          --service-account "cloudrun@gen-lang-client-0849634525.iam.gserviceaccount.com" \
           --set-env-vars="GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" \
           --set-env-vars="OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
           --set-env-vars="LANGSMITH_TRACING=${{ secrets.LANGSMITH_TRACING }}" \

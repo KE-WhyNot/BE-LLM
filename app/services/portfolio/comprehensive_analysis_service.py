@@ -146,8 +146,11 @@ market_opportunities: ["시장 기회1", "시장 기회2"]
 investment_thesis: [핵심 투자 논리 2-3문장]
 
 === 분석 가이드라인 ===
-1. 재무제표 분석(40%)과 시장 뉴스 분석(60%) 가중 평균
-2. {investment_profile} 투자자에게 적합한 관점으로 평가
+1. 재무제표 분석(안정성)과 시장 뉴스 분석(성장성)을 종합적으로 고려하여 점수를 산출하세요.
+2. **투자자 성향을 최우선으로 반영**하여 점수를 조정하세요.
+|   - **안정형/안정추구형**: 재무 안정성(재무 점수)에 높은 가중치 (60% 이상)를 부여하세요.
+|   - **적극투자형/공격투자형**: 성장 잠재력(뉴스 분석)에 높은 가중치 (60% 이상)를 부여하세요.
+|   - **위험중립형**: 재무와 뉴스 분석의 균형을 맞추세요 (50:50).
 3. 단기 뉴스 이슈와 중장기 재무 펀더멘털 균형 고려
 4. 구체적이고 실용적인 투자 근거 제시
 
@@ -249,6 +252,15 @@ investment_thesis: [핵심 투자 논리 2-3문장]
                         elif 'market_opportunities' in key:
                             result["market_opportunities"] = factors[:2]
             
+            # 🔥 동적 점수 계산 (LLM이 점수를 제공하지 않은 경우)
+            if result["comprehensive_score"] == 50:
+                financial_score = result['analysis_components'].get('financial_score', 50)
+                sentiment_score = result['analysis_components'].get('sector_sentiment', 0)
+                
+                # 가중 평균 (재무 40%, 뉴스 60%)
+                calculated_score = (financial_score * 0.4) + (((sentiment_score + 1) * 50) * 0.6)
+                result["comprehensive_score"] = max(10, min(95, int(calculated_score)))
+
         except Exception as e:
             print(f"⚠️ 종합 분석 파싱 실패: {e}")
         

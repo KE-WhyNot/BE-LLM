@@ -3,7 +3,7 @@ from typing import Optional, Any
 
 # 프론트엔드에서 백엔드로 보내는 요청 형식
 class ChatRequest(BaseModel):
-    user_id: Optional[int] = None # 로그인 안한 사용자일 수도 있음
+    user_id: Optional[str] = None # 로그인 안한 사용자일 수도 있음
     session_id: str # 사용자 대화 세션을 구분하기 위한 ID
     message: str
 
