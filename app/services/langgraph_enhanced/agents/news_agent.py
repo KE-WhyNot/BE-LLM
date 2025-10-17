@@ -194,87 +194,79 @@ focus_areas: [값]"""
         return "\n".join(formatted)
     
     async def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """뉴스 에이전트 처리 (async)"""
+        """뉴스 에이전트 처리 (async)
+        Fast-path: 단순 뉴스 질의는 전략 LLM/분석 LLM 생략하고 news_service 직접 호출(10s 타임박스) + 간단 요약 반환
+        """
         try:
             self.log(f"뉴스 수집 시작: {user_query}")
-            
-            # LLM이 뉴스 수집 전략 결정
+            primary = query_analysis.get('primary_intent', 'news')
+            complexity = query_analysis.get('complexity_level', 'simple')
+            is_simple_news = (primary == 'news' and complexity == 'simple')
+
+            import asyncio
+            news_data: List[Dict[str, Any]] = []
+            mk_context = ""
+            strategy: Dict[str, Any] = {}
+
+            if is_simple_news:
+                # Fast-path: news_service 직접 호출 + 타임박스 10s
+                try:
+                    news_data = await asyncio.wait_for(
+                        news_service.get_comprehensive_news(query=user_query, translate=True),
+                        timeout=10.0
+                    )
+                except asyncio.TimeoutError:
+                    self.log("뉴스 수집 타임아웃(10s)")
+                    news_data = []
+
+                # 간단 요약(LLM 미사용)
+                if news_data:
+                    lines = []
+                    for i, n in enumerate(news_data[:3], 1):
+                        title = n.get('title', '제목 없음')
+                        src = n.get('source', 'N/A')
+                        pub = n.get('published', '')[:10]
+                        lines.append(f"{i}. {title} (출처: {src}, {pub})")
+                    analysis_result = "\n".join(lines)
+                else:
+                    analysis_result = "관련 뉴스를 찾을 수 없습니다."
+
+                return {
+                    'success': True,
+                    'news_data': news_data,
+                    'analysis_result': analysis_result,
+                    'strategy': {},
+                    'fast_path': True
+                }
+
+            # 일반 경로: 기존 전략 + 분석(단, 캐시/로깅 적용)
             prompt = self.get_prompt_template().format(
                 user_query=user_query,
                 primary_intent=query_analysis.get('primary_intent', 'news'),
                 complexity_level=query_analysis.get('complexity_level', 'simple'),
                 required_services=query_analysis.get('required_services', [])
             )
-            
-            response = self.llm.invoke(prompt)
-            strategy = self.parse_news_strategy(response.content.strip())
-            
-            print(f"🔍 [NewsAgent] 생성된 전략:")
-            print(f"   - search_strategy: {strategy.get('search_strategy')}")
-            print(f"   - search_query: {strategy.get('search_query')}")
-            print(f"   - news_sources: {strategy.get('news_sources')}")
-            
-            # 실제 뉴스 수집 (async)
-            news_data = []
-            mk_context = ""  # 매일경제 컨텍스트는 별도로 저장
-            
-            try:
-                if strategy['news_sources'] in ['google', 'both']:
-                    print(f"📰 [NewsAgent] Google RSS에서 뉴스 수집 시작: {strategy['search_query']}")
-                    # async 함수 직접 호출 - 리스트 반환
-                    google_news = await news_service.get_comprehensive_news(
-                        query=strategy['search_query']
-                    )
-                    
-                    print(f"   ✅ [NewsAgent] Google RSS 결과: {len(google_news) if google_news else 0}개")
-                    
-                    if google_news and isinstance(google_news, list):
-                        news_data.extend(google_news)
-                
-                if strategy['news_sources'] in ['mk', 'both']:
-                    # 매일경제 KG 컨텍스트는 한국어 핵심 키워드 사용
-                    # 예: "금리 뉴스 분석해줘" → "금리"
-                    korean_keyword = self._extract_korean_keyword(user_query)
-                    print(f"   📚 [NewsAgent] 매일경제 KG 검색 키워드: {korean_keyword}")
-                    
-                    # async 함수 호출 - 문자열 반환
-                    mk_context = await news_service.get_analysis_context_from_kg(
-                        query=korean_keyword,
-                        limit=5
-                    )
-                
-                # 중복 제거 및 정렬
-                news_data = self._deduplicate_news(news_data)
-                
-            except Exception as e:
-                self.log(f"뉴스 수집 오류: {e}")
-                import traceback
-                traceback.print_exc()
-                news_data = []
-                mk_context = ""
-            
-            # 뉴스 분석
-            if news_data or mk_context:
+            response_text = self.invoke_llm_with_cache(prompt, purpose="news", log_label="news_strategy")
+            strategy = self.parse_news_strategy(response_text.strip())
+
+            # 실제 뉴스 수집
+            news_data = await news_service.get_comprehensive_news(
+                query=strategy.get('search_query') or user_query,
+                translate=True
+            )
+
+            # 간단 분석(짧은 요약)으로 토큰 최소화
+            if news_data:
                 analysis_prompt = self.generate_news_analysis_prompt(news_data, strategy, user_query)
-                
-                # 매일경제 컨텍스트 추가
-                if mk_context:
-                    analysis_prompt += f"\n\n{mk_context}"
-                
-                analysis_response = self.llm.invoke(analysis_prompt)
-                analysis_result = analysis_response.content
-                
-                self.log(f"뉴스 분석 완료: {len(news_data or [])}건")
+                analysis_result = self.invoke_llm_with_cache(analysis_prompt, purpose="news", log_label="news_analysis_short")
             else:
                 analysis_result = "관련 뉴스를 찾을 수 없습니다. 다른 키워드로 검색해보세요."
-                self.log("뉴스를 찾을 수 없음")
-            
+
             return {
                 'success': True,
                 'news_data': news_data,
                 'analysis_result': analysis_result,
-                'strategy': strategy,
-                'mk_context': mk_context
+                'strategy': strategy
             }
             
         except Exception as e:

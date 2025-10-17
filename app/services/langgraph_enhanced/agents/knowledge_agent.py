@@ -422,8 +422,8 @@ reasoning: [선택한 이유]"""
                 required_services=query_analysis.get('required_services', [])
             )
             
-            response = self.llm.invoke(prompt)
-            strategy = self.parse_education_strategy(response.content.strip())
+            response_text = self.invoke_llm_with_cache(prompt, purpose="knowledge", log_label="knowledge_strategy")
+            strategy = self.parse_education_strategy(response_text.strip())
             
             # 4. 설명 생성
             if rag_context:
@@ -450,8 +450,7 @@ reasoning: [선택한 이유]"""
 
 명확하고 구체적으로 설명해주세요."""
                 
-                explanation_response = self.llm.invoke(explanation_prompt)
-                explanation_result = explanation_response.content
+                explanation_result = self.invoke_llm_with_cache(explanation_prompt, purpose="knowledge", log_label="knowledge_explanation_rag")
                 
                 self.log(f"RAG 기반 지식 교육 완료")
             else:
@@ -469,8 +468,7 @@ reasoning: [선택한 이유]"""
 
 명확하고 친절하게 설명해주세요."""
                 
-                explanation_response = self.llm.invoke(explanation_prompt)
-                explanation_result = explanation_response.content
+                explanation_result = self.invoke_llm_with_cache(explanation_prompt, purpose="knowledge", log_label="knowledge_explanation_basic")
             
             return {
                 'success': True,
