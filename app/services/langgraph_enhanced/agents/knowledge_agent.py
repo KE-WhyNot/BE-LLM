@@ -403,12 +403,105 @@ reasoning: [선택한 이유]"""
             self.log(f"RAG 검색 오류: {e}")
             return ""
     
+    def _get_simple_knowledge_response(self, user_query: str) -> str:
+        """Fast-path 지식 응답: 간단한 질문에 대한 빠른 답변"""
+        try:
+            # 1. 내장 지식 DB에서 직접 검색
+            knowledge_db = self._load_knowledge_database()
+            
+            # 키워드 기반 매칭
+            query_lower = user_query.lower()
+            matched_concept = None
+            
+            for concept, data in knowledge_db.items():
+                concept_name = data.get('name', '').lower()
+                if concept.lower() in query_lower or concept_name in query_lower:
+                    matched_concept = concept
+                    break
+            
+            if matched_concept:
+                knowledge_data = knowledge_db[matched_concept]
+                print(f"⚡ Fast-path 지식 매칭: {matched_concept}")
+                
+                # 간단한 설명 생성
+                response_parts = [f"📚 **{knowledge_data.get('name', matched_concept)}**\n"]
+                response_parts.append(f"💡 **정의**: {knowledge_data.get('definition', '정의 없음')}")
+                
+                if 'formula' in knowledge_data:
+                    response_parts.append(f"📊 **공식**: {knowledge_data['formula']}")
+                
+                if 'examples' in knowledge_data and knowledge_data['examples']:
+                    response_parts.append(f"📝 **예시**: {knowledge_data['examples'][0]}")
+                
+                if 'usage' in knowledge_data:
+                    response_parts.append(f"🎯 **활용**: {knowledge_data['usage']}")
+                
+                return "\n".join(response_parts)
+            
+            # 2. RAG로 빠른 검색
+            namespace = self._determine_namespace_simple(user_query)
+            rag_context = self._get_rag_context(user_query, namespace, top_k=3)
+            
+            if rag_context:
+                print(f"⚡ Fast-path RAG 검색: {namespace}")
+                # 간단한 LLM 호출로 요약
+                summary_prompt = f"""다음 지식 정보를 바탕으로 사용자 질문에 간단히 답변해주세요.
+
+질문: {user_query}
+
+지식 정보:
+{rag_context}
+
+간단하고 명확한 답변을 3-4문장으로 작성해주세요."""
+                
+                response = self.llm.invoke(summary_prompt)
+                return response.content.strip()
+            
+            return "해당 질문에 대한 정보를 찾을 수 없습니다."
+            
+        except Exception as e:
+            print(f"⚠️ Fast-path 지식 검색 실패: {e}")
+            return ""
+    
+    def _determine_namespace_simple(self, user_query: str) -> str:
+        """간단한 네임스페이스 결정 (키워드 기반)"""
+        query_lower = user_query.lower()
+        
+        # 키워드 기반 분류
+        if any(word in query_lower for word in ['뭐야', '무엇', '의미', '정의', '개념', '란', '이란']):
+            return 'terminology'
+        elif any(word in query_lower for word in ['분석', '재무', '경제', '실적', '지표']):
+            return 'financial_analysis'
+        elif any(word in query_lower for word in ['청년', '정책', '지원', '혜택']):
+            return 'youth_policy'
+        elif any(word in query_lower for word in ['투자', '전략', '포트폴리오', '분산']):
+            return 'investment_strategy'
+        else:
+            return 'terminology'  # 기본값
+    
     def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """지식 에이전트 처리 (네임스페이스 라우팅)"""
+        """지식 에이전트 처리 (네임스페이스 라우팅) - Fast-path 지원"""
         try:
             self.log(f"지식 교육 시작: {user_query}")
             
-            # 1. 네임스페이스 결정
+            # Fast-path 판정: 단순 지식 질의
+            primary_intent = query_analysis.get('primary_intent', 'knowledge')
+            complexity = query_analysis.get('complexity_level', 'simple')
+            is_simple_knowledge = (primary_intent == 'knowledge' and complexity == 'simple')
+            
+            if is_simple_knowledge:
+                print("⚡ Knowledge Fast-path: 단순 지식 질의 감지 - 전략 LLM 생략")
+                # Fast-path: 바로 지식 검색 및 간단한 설명
+                simple_response = self._get_simple_knowledge_response(user_query)
+                if simple_response:
+                    return {
+                        'success': True,
+                        'explanation_result': simple_response,
+                        'fast_path': True,
+                        'skip_result_combiner': True  # 결과 통합 건너뛰기 플래그
+                    }
+            
+            # 일반 경로: 1. 네임스페이스 결정
             namespace = self._determine_namespace(user_query, query_analysis)
             
             # 2. RAG 컨텍스트 가져오기
@@ -422,8 +515,8 @@ reasoning: [선택한 이유]"""
                 required_services=query_analysis.get('required_services', [])
             )
             
-            response_text = self.invoke_llm_with_cache(prompt, purpose="knowledge", log_label="knowledge_strategy")
-            strategy = self.parse_education_strategy(response_text.strip())
+            response = self.llm.invoke(prompt)
+            strategy = self.parse_education_strategy(response.content.strip())
             
             # 4. 설명 생성
             if rag_context:
@@ -450,7 +543,8 @@ reasoning: [선택한 이유]"""
 
 명확하고 구체적으로 설명해주세요."""
                 
-                explanation_result = self.invoke_llm_with_cache(explanation_prompt, purpose="knowledge", log_label="knowledge_explanation_rag")
+                explanation_response = self.llm.invoke(explanation_prompt)
+                explanation_result = explanation_response.content
                 
                 self.log(f"RAG 기반 지식 교육 완료")
             else:
@@ -468,7 +562,8 @@ reasoning: [선택한 이유]"""
 
 명확하고 친절하게 설명해주세요."""
                 
-                explanation_result = self.invoke_llm_with_cache(explanation_prompt, purpose="knowledge", log_label="knowledge_explanation_basic")
+                explanation_response = self.llm.invoke(explanation_prompt)
+                explanation_result = explanation_response.content
             
             return {
                 'success': True,

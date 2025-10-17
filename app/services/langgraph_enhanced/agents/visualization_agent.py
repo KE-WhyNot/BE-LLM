@@ -280,7 +280,8 @@ include_analysis: [값]"""
             # 차트 분석
             if chart_data and 'error' not in chart_data and strategy.get('include_analysis', True):
                 analysis_prompt = self.generate_chart_analysis_prompt(chart_data, strategy, user_query)
-                analysis_result = self.invoke_llm_with_cache(analysis_prompt, purpose="analysis", log_label="chart_analysis")
+                analysis_response = self.llm.invoke(analysis_prompt)
+                analysis_result = analysis_response.content
                 
                 self.log("차트 분석 완료")
             else:

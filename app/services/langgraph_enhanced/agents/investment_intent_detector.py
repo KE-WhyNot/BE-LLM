@@ -173,8 +173,8 @@ requires_deep_analysis: [값]"""
         """투자 의도 감지"""
         try:
             prompt = self.get_prompt_template().format(user_query=user_query)
-            response_text = self.invoke_llm_with_cache(prompt, purpose="classification", log_label="intent_detection")
-            result = self.parse_response(response_text.strip())
+            response = self.llm.invoke(prompt)
+            result = self.parse_response(response.content.strip())
             
             self.log(f"투자 의도 감지: {result['is_investment_question']} (신뢰도: {result['confidence']:.2f})")
             self.log(f"  근거: {result['reasoning']}")

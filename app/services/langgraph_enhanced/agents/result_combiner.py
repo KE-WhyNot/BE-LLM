@@ -202,7 +202,8 @@ class ResultCombinerAgent(BaseAgent):
             )
             
             # LLM 호출
-            combined_response = self.invoke_llm_with_cache(prompt, purpose="response", log_label="result_combination")
+            response = self.llm.invoke(prompt)
+            combined_response = response.content
             
             # 신뢰도 추출
             confidence = self._extract_confidence(combined_response)
