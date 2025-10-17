@@ -217,8 +217,8 @@ next_agent: [값]"""
         
         # 2. 일반 쿼리 분석
         prompt = self.get_prompt_template().format(user_query=user_query)
-        response = self.llm.invoke(prompt)
-        analysis_result = self.parse_response(response.content.strip())
+        response_text = self.invoke_llm_with_cache(prompt, purpose="classification", log_label="query_analysis")
+        analysis_result = self.parse_response(response_text.strip())
         
         # 3. 투자 의도 정보 통합
         analysis_result['is_investment_question'] = is_investment_question
@@ -251,8 +251,8 @@ next_agent: [값]"""
         
         # 2. 일반 쿼리 분석
         prompt = self.get_prompt_template().format(user_query=user_query)
-        response = self.llm.invoke(prompt)
-        analysis_result = self.parse_response(response.content.strip())
+        response_text = self.invoke_llm_with_cache(prompt, purpose="classification", log_label="query_analysis_dup")
+        analysis_result = self.parse_response(response_text.strip())
         
         # 3. 투자 의도 정보 통합
         analysis_result['is_investment_question'] = is_investment_question

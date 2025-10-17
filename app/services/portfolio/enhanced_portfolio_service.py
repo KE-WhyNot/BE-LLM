@@ -123,6 +123,12 @@ class EnhancedPortfolioService:
         step6_start = time.time()
         now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         
+        # 디버깅: recommended_stocks 상태 확인
+        print(f"🔍 [디버깅] recommended_stocks 타입: {type(recommended_stocks)}")
+        print(f"🔍 [디버깅] recommended_stocks 개수: {len(recommended_stocks) if recommended_stocks else 0}")
+        if recommended_stocks:
+            print(f"🔍 [디버깅] 첫 번째 종목: {recommended_stocks[0].stockName if recommended_stocks[0] else 'None'}")
+        
         result = PortfolioRecommendationResult(
             portfolioId=profile.profileId,
             userId=profile.userId,
@@ -131,6 +137,11 @@ class EnhancedPortfolioService:
             createdAt=now,
             updatedAt=now
         )
+        
+        # 디버깅: 결과 객체 상태 확인
+        print(f"🔍 [디버깅] result.recommendedStocks 개수: {len(result.recommendedStocks) if result.recommendedStocks else 0}")
+        print(f"🔍 [디버깅] result.allocationSavings: {result.allocationSavings}")
+        
         step6_time = time.time() - step6_start
         print(f"⏱️ [단계 6] 결과 생성: {step6_time:.3f}초")
         

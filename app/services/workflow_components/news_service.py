@@ -1,12 +1,19 @@
-"""뉴스 조회 서비스 (동적 프롬프팅 지원 + 매일경제 RSS + Google RSS 번역 통합)"""
+"""뉴스 조회 서비스 (yfinance 우선 + 캐싱 + Google RSS 풀백 + 번역/정규화/중복 제거)"""
 
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import re
+from datetime import datetime, timezone
+import yfinance as yf
+import asyncio
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
 from app.services.workflow_components.data_agent_service import NewsCollector
 from app.services.workflow_components.mk_rss_scraper import MKKnowledgeGraphService, search_mk_news
 from app.services.workflow_components.google_rss_translator import google_rss_translator, search_google_news
+from app.utils.common_utils import CacheManager
+from deep_translator import GoogleTranslator
+from app.services.langgraph_enhanced.llm_manager import llm_manager
 from app.utils.stock_utils import get_company_name_from_symbol
 # prompt_manager는 agents/에서 개별 관리
 
@@ -15,9 +22,9 @@ class NewsService:
     """금융 뉴스 조회를 담당하는 서비스 (통합 뉴스 서비스)
     
     뉴스 소스:
-    1. 매일경제 RSS + Neo4j (수동 업데이트, 임베딩 검색)
-    2. Google RSS (실시간, 자동 번역)
-    3. 기존 RSS (Naver, Daum - 폴백용)
+    1. yfinance (우선)
+    2. Google RSS (실시간, 자동 번역) - 풀백
+    3. 매일경제 RSS + Neo4j (임베딩 컨텍스트, 분석용)
     """
     
     def __init__(self):
@@ -25,6 +32,11 @@ class NewsService:
         self.mk_kg_service = MKKnowledgeGraphService()  # 매일경제 지식그래프
         self.google_translator = google_rss_translator  # Google RSS 번역
         self.llm = self._initialize_llm()
+        # 뉴스 캐시(10분), 네거티브 캐시(30초)
+        self.news_cache = CacheManager(default_ttl=600)
+        self.negative_cache_ttl = 30
+        # 번역기 (필요 시만 사용)
+        self._translator: Optional[GoogleTranslator] = None
     
     def _initialize_llm(self):
         """LLM 초기화"""
@@ -230,8 +242,16 @@ class NewsService:
         try:
             print(f"📚 매일경제 KG 컨텍스트 검색 (분석용): {query}")
             
-            # 매일경제 지식그래프에서 검색
-            mk_results = await self.mk_kg_service.search_news(query, category, limit)
+            # 매일경제 지식그래프에서 검색 (타임아웃 6s)
+            import asyncio
+            try:
+                mk_results = await asyncio.wait_for(
+                    self.mk_kg_service.search_news(query, category, limit),
+                    timeout=6.0
+                )
+            except asyncio.TimeoutError:
+                print("⏱️ 매일경제 KG 검색 타임아웃(6s)")
+                mk_results = []
             
             # 결과 포맷팅
             formatted_results = []
@@ -347,67 +367,270 @@ class NewsService:
                                     use_google_rss: bool = True,
                                     translate: bool = True,
                                     korean_query: str = None) -> List[Dict[str, Any]]:
-        """✨ 종합 뉴스 검색 (매일경제 RSS + Google RSS)
-        ✨ FallbackAgent 사용
-        
-        전략:
-        - 매일경제 RSS (한국어) → korean_query 사용
-        - Google RSS (영어) → query 사용
-        
-        Args:
-            query: 검색 쿼리 (영어)
-            use_google_rss: Google RSS 실시간 검색 사용 여부
-            translate: Google RSS 뉴스 번역 여부
-            korean_query: 한국어 검색 쿼리 (매일경제용)
-            
-        Returns:
-            List[Dict[str, Any]]: 통합된 뉴스 리스트
+        """✨ 종합 뉴스 검색 (병렬 수집 + .KS는 KG/RSS 우선 + 무가정)
+        - yfinance / Neo4j KG / Google RSS를 병렬 실행하고 제한시간 내 결과 선택
+        - 한국(.KS) 종목은 KG→RSS→yfinance 우선, 그 외는 yfinance→RSS→KG
+        - 뉴스가 없으면 가정/추정 생성 없이 빈 결과 반환
         """
         try:
             from app.services.langgraph_enhanced.agents import get_news_source_fallback
+            print(f"📰 종합 뉴스 검색 시작: {query}")
+            overall_start = datetime.now()
             
-            print(f"📰 실시간 뉴스 검색 (FallbackAgent): {query}")
-            
-            all_news = []
-            
-            # 특별한 케이스: 오늘 하루 시장 뉴스 요청
+            # 특별 케이스
             if query == "오늘 하루 시장 뉴스":
                 return await self.get_today_market_news(limit=10)
             
-            # FallbackAgent를 통한 자동 풀백 실행
-            fallback_helper = get_news_source_fallback()
+            # 심볼 추정으로 KR 여부 판단
+            symbol_hint = self._maybe_extract_symbol(query)
+            is_kr = bool(symbol_hint and symbol_hint.endswith('.KS'))
             
-            # Primary 소스 결정
-            primary_source = "google_rss" if use_google_rss else "mk_rss"
+            # 준비: 작업 정의
+            async def run_yf():
+                yf_key = self._make_cache_key("yf", query)
+                cached = self.news_cache.get(yf_key)
+                if cached is not None:
+                    print(f"📦 yfinance 캐시 HIT: {len(cached)}개")
+                    return cached
+                _t0 = datetime.now()
+                data = await self._try_yfinance_news(query, limit=8, translate=translate)
+                print(f"⏱ yfinance 소요: {(datetime.now()-_t0).total_seconds()*1000:.1f}ms")
+                if data:
+                    self.news_cache.set(yf_key, data, ttl=600)
+                else:
+                    self.news_cache.set(yf_key, [], ttl=self.negative_cache_ttl)
+                return data
             
-            # 뉴스 수집 with 자동 풀백
-            result = await fallback_helper.get_news_with_fallback(
-                query=query,
-                primary_source=primary_source,
-                limit=5
-            )
+            async def run_kg():
+                try:
+                    _t0 = datetime.now()
+                    _data = await asyncio.wait_for(self.get_mk_news_with_embedding(query, limit=8), timeout=6.0)
+                    print(f"⏱ KG 소요: {(datetime.now()-_t0).total_seconds()*1000:.1f}ms")
+                    return _data
+                except Exception as _e:
+                    print(f"⚠️ KG 실패/타임아웃: {_e}")
+                    return []
             
-            if result['success']:
-                all_news = result['data']
-                print(f"  ✅ 뉴스 수집 성공 (소스: {result['source']}): {len(all_news)}개")
+            async def run_rss():
+                if not use_google_rss:
+                    return []
+                try:
+                    fallback_helper = get_news_source_fallback()
+                    _t0 = datetime.now()
+                    result = await asyncio.wait_for(
+                        fallback_helper.get_news_with_fallback(query=query, primary_source="google_rss", limit=8),
+                        timeout=6.0
+                    )
+                    print(f"⏱ RSS 소요: {(datetime.now()-_t0).total_seconds()*1000:.1f}ms")
+                    return result['data'] if result.get('success') else []
+                except Exception as _e:
+                    print(f"⚠️ RSS 실패/타임아웃: {_e}")
+                    return []
+            
+            # 병렬 실행
+            tasks = [run_yf(), run_kg(), run_rss()]
+            yf_news, kg_news, rss_news = await asyncio.gather(*tasks, return_exceptions=False)
+            
+            # 선택 우선순위
+            candidates = []
+            if is_kr:
+                candidates = [kg_news, rss_news, yf_news]
             else:
-                print(f"  ⚠️ 모든 뉴스 소스 실패")
-                all_news = []
+                candidates = [yf_news, rss_news, kg_news]
             
-            # 중복 제거 (URL 기준 + 제목 유사도)
-            unique_news = self._remove_duplicates(all_news)
+            # 첫 비어있지 않은 후보 선택
+            for cand in candidates:
+                if cand:
+                    selected = cand
+                    break
+            else:
+                selected = []
             
-            # 관련도 + 최신순 정렬
+            # 중복 제거 및 정렬
+            unique_news = self._remove_duplicates(selected)
             sorted_news = self._sort_news_by_relevance(unique_news, query)
             
-            print(f"✅ 실시간 뉴스 검색 결과: {len(sorted_news)}개 (중복 제거 후)")
-            return sorted_news[:10]  # 최대 10개 반환
-            
+            elapsed = (datetime.now() - overall_start).total_seconds() * 1000
+            print(f"✅ 실시간 뉴스 검색 결과: {len(sorted_news)}개 (중복 제거 후) | {elapsed:.1f}ms | KR={is_kr}")
+            return sorted_news[:10]
         except Exception as e:
             print(f"❌ 뉴스 검색 중 오류: {e}")
             import traceback
             traceback.print_exc()
             return []
+
+    async def _try_yfinance_news(self, query: str, limit: int = 8, translate: bool = True) -> List[Dict[str, Any]]:
+        """yfinance 뉴스 시도(티커 추정 → 뉴스 수집 → 정규화/번역/정렬)"""
+        symbol = self._maybe_extract_symbol(query)
+        if not symbol:
+            return []
+        try:
+            print(f"🔎 yfinance 뉴스 시도: symbol={symbol}")
+            ticker = yf.Ticker(symbol)
+
+            # 네트워크 지연 방지를 위해 executor + 타임아웃 적용
+            loop = asyncio.get_event_loop()
+            try:
+                items = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: getattr(ticker, "news", None)),
+                    timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                print("⏱️ yfinance 뉴스 조회 타임아웃(5s)")
+                items = None
+
+            items = items or []
+            if not items:
+                return []
+            normalized: List[Dict[str, Any]] = []
+            for it in items[:limit]:
+                title = it.get("title", "").strip()
+                link = it.get("link") or it.get("url") or ""
+                pub_ts = it.get("providerPublishTime") or it.get("provider_publish_time")
+                if isinstance(pub_ts, (int, float)):
+                    published = datetime.fromtimestamp(pub_ts, tz=timezone.utc).isoformat()
+                else:
+                    published = datetime.now(timezone.utc).isoformat()
+                summary = it.get("summary", "")
+                news_item = {
+                    "title": title,
+                    "summary": summary,
+                    "url": link,
+                    "published": published,
+                    "source": "yfinance",
+                    "language": "en",
+                    "translated": False,
+                    "symbol": symbol
+                }
+                normalized.append(news_item)
+            # 번역(옵션)
+            if translate and normalized:
+                await self._ensure_translator()
+                # 타이틀은 반드시 번역, 요약은 선택적(시간 단축)
+                async def _tr_title(n: Dict[str, Any]):
+                    n["title_en"] = n.get("title", "")
+                    if self._translator and n["title_en"]:
+                        try:
+                            n["title"] = await asyncio.wait_for(
+                                self._translate_text(n["title_en"]), timeout=3.0
+                            )
+                        except Exception:
+                            n["title"] = n["title_en"]
+                    else:
+                        n["title"] = n["title_en"]
+                    n["translated"] = True
+                    n["language"] = "ko"
+
+                async def _tr_summary(n: Dict[str, Any]):
+                    n["summary_en"] = n.get("summary", "")
+                    if self._translator and n["summary_en"]:
+                        try:
+                            n["summary"] = await asyncio.wait_for(
+                                self._translate_text(n["summary_en"][:400]), timeout=3.0
+                            )
+                        except Exception:
+                            n["summary"] = n["summary_en"]
+
+                # 병렬 번역(타이틀 필수, 요약은 베스트Effort)
+                await asyncio.gather(*[_tr_title(n) for n in normalized], return_exceptions=True)
+                await asyncio.gather(*[_tr_summary(n) for n in normalized], return_exceptions=True)
+            return normalized
+        except Exception as e:
+            print(f"❌ yfinance 뉴스 오류: {e}")
+            return []
+
+    async def _ensure_translator(self):
+        if self._translator is None:
+            try:
+                self._translator = GoogleTranslator(source='auto', target='ko')
+            except Exception:
+                self._translator = None
+
+    async def _translate_text(self, text: str) -> str:
+        """번역 비동기 헬퍼(run_in_executor)"""
+        if not text:
+            return text
+        loop = asyncio.get_event_loop()
+        try:
+            return await loop.run_in_executor(None, self._translator.translate, text)
+        except Exception:
+            return text
+
+    def _maybe_extract_symbol(self, text: str) -> Optional[str]:
+        """심볼 추정: 규칙 기반 → 캐시 → LLM 폴백(데이터 에이전트 방식 차용)"""
+        t = (text or "").strip()
+        # 한국: 6자리.KS
+        if re.match(r"^\d{6}\.KS$", t):
+            return t
+        # 미국: 대문자/숫자/.-/^ 최대 10자
+        if re.match(r"^[A-Z0-9\.^\-]{1,10}$", t):
+            return t
+        # 텍스트에서 심볼 추출 시도
+        try:
+            from app.utils.stock_utils import extract_symbol_from_query
+            symbol = extract_symbol_from_query(t)
+            if symbol:
+                return symbol
+        except Exception:
+            return None
+        # 캐시 확인
+        key = self._make_cache_key("symres", t)
+        cached = self.news_cache.get(key)
+        if cached is not None:
+            return cached or None
+        # LLM 폴백으로 심볼 해석(데이터 에이전트 방식의 규칙을 프롬프트에 포함)
+        try:
+            resolved = self._resolve_symbol_with_llm(t)
+            # 결과 캐시(양/음)
+            self.news_cache.set(key, resolved or "", ttl=24 * 3600 if resolved else 300)
+            return resolved
+        except Exception:
+            # 음수 캐시(5분)
+            self.news_cache.set(key, "", ttl=300)
+            return None
+
+    def _resolve_symbol_with_llm(self, query_text: str) -> Optional[str]:
+        """LLM을 사용해 회사명/자유 질의를 Yahoo Finance 티커로 매핑
+        - 한국: 6자리 + .KS (예: 삼성전자 → 005930.KS)
+        - 미국: 표준 티커 (AAPL, TSLA 등)
+        - 유럽: 거래소 접미사 (예: MC.PA, BMW.DE)
+        - 출력 형식: data_query: <TICKER> 한 줄만
+        """
+        prompt = f"""
+당신은 금융 데이터 전문가입니다. 아래 질의를 Yahoo Finance에서 사용하는 정확한 티커로 변환하세요.
+
+규칙:
+- 한국 주식: 6자리 코드 + .KS (삼성전자→005930.KS, 네이버→035420.KS)
+- 미국 주식: 표준 티커 (테슬라→TSLA, 애플→AAPL, 디즈니→DIS)
+- 유럽/기타: 거래소 접미사 (LVMH→MC.PA, BMW→BMW.DE)
+- 불명확하면 가장 가능성 높은 단일 티커를 제시
+
+질의: "{query_text}"
+
+정확히 아래 한 줄만 반환:
+data_query: <TICKER>
+"""
+        llm = llm_manager.get_llm(purpose="classification")
+        text = llm_manager.invoke_with_cache(llm, prompt, purpose="classification")
+        # 파싱
+        try:
+            for line in (text or "").splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    if k.strip().lower() == "data_query":
+                        ticker = v.strip()
+                        # 간단 유효성 검사
+                        if re.match(r"^\d{6}\.KS$", ticker) or re.match(r"^[A-Z][A-Z0-9\.^\-]{0,9}$", ticker):
+                            return ticker
+                        return ticker  # 느슨 허용(추가 검증은 downstream)
+        except Exception:
+            pass
+        return None
+
+    def _make_cache_key(self, source: str, query: str) -> str:
+        q = (query or "").strip().lower()
+        q = re.sub(r"\s+", " ", q)
+        return f"news:{source}:{q}"
     
     def _remove_duplicates(self, news_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """중복 뉴스 제거 (URL + 제목 유사도 기반)"""
