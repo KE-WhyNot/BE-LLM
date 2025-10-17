@@ -127,7 +127,8 @@ class ResponseAgent(BaseAgent):
                 collected_information=collected_info
             )
             
-            final_response = self.invoke_llm_with_cache(prompt, purpose="response", log_label="final_response_generation")
+            response = self.llm.invoke(prompt)
+            final_response = response.content
             
             self.log("최종 응답 생성 완료")
             

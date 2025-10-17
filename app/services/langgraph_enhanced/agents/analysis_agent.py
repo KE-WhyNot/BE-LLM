@@ -225,8 +225,8 @@ recommendation_style: [값]"""
                 required_services=query_analysis.get('required_services', [])
             )
             
-            response_text = self.invoke_llm_with_cache(prompt, purpose="analysis", log_label="analysis_strategy")
-            strategy = self.parse_analysis_strategy(response_text.strip())
+            response = self.llm.invoke(prompt)
+            strategy = self.parse_analysis_strategy(response.content.strip())
             
             # 종목명 추출
             stock_symbol = self._extract_stock_symbol(user_query)
@@ -413,7 +413,8 @@ recommendation_style: [값]"""
 ✅ **균형성**: 호재와 악재의 **영향력을 비교 분석**하여 종합적인 판단 제시
 ✅ **실용성**: 실제 투자에 바로 활용 가능한 구체적 전략 제시"""
                 
-                analysis_result = self.invoke_llm_with_cache(analysis_prompt, purpose="analysis", log_label="integrated_investment_analysis")
+                analysis_response = self.llm.invoke(analysis_prompt)
+                analysis_result = analysis_response.content
                 
                 self.log(f"통합 투자 분석 완료: {stock_symbol or stock_name}")
             else:

@@ -209,10 +209,10 @@ warnings: 해외 주식 정보는 현재 시스템 범위 밖
             )
             
             # LLM 호출
-            response_text = self.invoke_llm_with_cache(prompt, purpose="analysis", log_label="confidence_evaluation")
+            response = self.llm.invoke(prompt)
             
             # 응답 파싱
-            evaluation = self.parse_response(response_text)
+            evaluation = self.parse_response(response.content)
             
             print(f"📊 신뢰도 평가 완료:")
             print(f"   전체 신뢰도: {evaluation['overall_confidence']:.2f}")

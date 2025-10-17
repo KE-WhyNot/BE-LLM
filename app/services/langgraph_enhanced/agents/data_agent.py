@@ -32,22 +32,22 @@ class DataAgent(BaseAgent):
 **Yahoo Finance에서 사용하는 정확한 심볼**을 data_query에 입력하세요.
 
 ### 변환 규칙:
-1. 한국 주식: 6자리 코드 + `.KS`
+1. **한국 주식**: 6자리 코드 + `.KS`
    - 예: 삼성전자 → 005930.KS, 네이버 → 035420.KS
 
-2. 미국 주식: 표준 티커 심볼 (1~5자 알파벳)
+2. **미국 주식**: 표준 티커 심볼 (1~5자 알파벳)
    - 예: 테슬라 → TSLA, 애플 → AAPL, 디즈니 → DIS, 스타벅스 → SBUX, 나이키 → NKE
    - **당신의 금융 지식을 활용하여 모든 회사명을 정확한 티커 심볼로 변환하세요**
 
-3. 유럽 주식: 티커 + 거래소 접미사
+3. **유럽 주식**: 티커 + 거래소 접미사
    - 프랑스 (파리): `.PA` (예: LVMH → MC.PA, 에르메스 → RMS.PA)
    - 영국 (런던): `.L` (예: BP → BP.L)
    - 독일 (프랑크푸르트): `.DE` (예: BMW → BMW.DE)
 
-4. 이미 심볼 형태인 경우: 그대로 사용
+4. **이미 심볼 형태**인 경우: 그대로 사용
    - 예: "TSLA 주가" → TSLA, "DIS 차트" → DIS
 
-중요: 
+**중요**: 
 - 회사명(한글/영어)을 받으면 반드시 Yahoo Finance 티커 심볼로 변환하세요
 - 개별 상장되지 않은 브랜드(예: 구찌)는 모기업 심볼(Kering)을 사용하거나 "상장되지 않음" 안내
 
@@ -199,8 +199,8 @@ additional_info: [값]"""
                 required_services=query_analysis.get('required_services', [])
             )
             
-            response_text = self.invoke_llm_with_cache(prompt, purpose="analysis", log_label="data_strategy")
-            strategy = self.parse_data_strategy(response_text.strip())
+            response = self.llm.invoke(prompt)
+            strategy = self.parse_data_strategy(response.content.strip())
             
             # 실제 데이터 조회
             data = financial_data_service.get_financial_data(strategy['data_query'])

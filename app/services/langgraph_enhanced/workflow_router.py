@@ -137,15 +137,7 @@ class WorkflowRouter:
         
         # 다른 전문 에이전트들 → 결과 통합
         workflow.add_edge("analysis_agent", "result_combiner")
-        # 뉴스 에이전트는 Fast-path 지원: 조건부로 바로 응답 생성으로 이동
-        workflow.add_conditional_edges(
-            "news_agent",
-            self._route_after_news,
-            {
-                "response_agent": "response_agent",
-                "result_combiner": "result_combiner"
-            }
-        )
+        workflow.add_edge("news_agent", "result_combiner")
         workflow.add_edge("knowledge_agent", "result_combiner")
         workflow.add_edge("visualization_agent", "result_combiner")
         
@@ -165,8 +157,6 @@ class WorkflowRouter:
     def _query_analyzer_node(self, state: WorkflowState) -> WorkflowState:
         """쿼리 분석 노드"""
         try:
-            import time as _t
-            _ts = _t.time()
             user_query = state["user_query"]
             analyzer = self.agents["query_analyzer"]
             
@@ -177,7 +167,6 @@ class WorkflowRouter:
             print(f"🔍 쿼리 분석 완료: {query_analysis['primary_intent']} (신뢰도: {query_analysis['confidence']:.2f})")
             print(f"   근거: {query_analysis['reasoning']}")
             print(f"   다음 에이전트: {state['next_agent']}")
-            print(f"⏱ query_analyzer 소요: {(_t.time()-_ts)*1000:.1f}ms")
             
         except Exception as e:
             print(f"❌ 쿼리 분석 에이전트 오류: {e}")
@@ -190,8 +179,6 @@ class WorkflowRouter:
     def _service_planner_node(self, state: WorkflowState) -> WorkflowState:
         """서비스 계획 노드 - 복잡도 분석 및 실행 전략 수립"""
         try:
-            import time as _t
-            _ts = _t.time()
             user_query = state["user_query"]
             query_analysis = state["query_analysis"]
             
@@ -228,7 +215,6 @@ class WorkflowRouter:
             agents_list = service_plan.get('agents_to_execute', [])
             if agents_list:
                 print(f"   병렬 실행 에이전트: {', '.join(agents_list)}")
-            print(f"⏱ service_planner 소요: {(_t.time()-_ts)*1000:.1f}ms")
             
         except Exception as e:
             print(f"❌ 서비스 플래너 오류: {e}")
@@ -300,8 +286,6 @@ class WorkflowRouter:
     def _parallel_executor_node(self, state: WorkflowState) -> WorkflowState:
         """병렬 실행 노드 - 여러 에이전트 동시 실행"""
         try:
-            import time as _t
-            _ts = _t.time()
             user_query = state["user_query"]
             query_analysis = state["query_analysis"]
             service_plan = state["service_plan"]
@@ -337,7 +321,6 @@ class WorkflowRouter:
                         state["chart_data"] = result.get('chart_data', {})
             
             print(f"✅ 병렬 실행 완료: {len(parallel_results)}개 에이전트")
-            print(f"⏱ parallel_executor 소요: {(_t.time()-_ts)*1000:.1f}ms")
             
         except Exception as e:
             print(f"❌ 병렬 실행 오류: {e}")
@@ -352,8 +335,6 @@ class WorkflowRouter:
     def _result_combiner_node(self, state: WorkflowState) -> WorkflowState:
         """결과 통합 노드 - LLM 기반 지능형 결과 통합"""
         try:
-            import time as _t
-            _ts = _t.time()
             user_query = state["user_query"]
             
             # 에이전트별로 결과 구조화
@@ -412,7 +393,6 @@ class WorkflowRouter:
             state["combined_result"] = combined_result
             
             print(f"✅ 결과 통합 완료")
-            print(f"⏱ result_combiner 소요: {(_t.time()-_ts)*1000:.1f}ms")
             
         except Exception as e:
             print(f"❌ 결과 통합 오류: {e}")
@@ -427,8 +407,6 @@ class WorkflowRouter:
     def _confidence_calculator_node(self, state: WorkflowState) -> WorkflowState:
         """신뢰도 계산 노드 - 응답 품질 평가"""
         try:
-            import time as _t
-            _ts = _t.time()
             user_query = state["user_query"]
             combined_result = state.get("combined_result", {})
             
@@ -445,7 +423,6 @@ class WorkflowRouter:
             print(f"   전체 신뢰도: {confidence_evaluation.get('overall_confidence', 0):.2f}")
             print(f"   데이터 품질: {confidence_evaluation.get('data_quality', 0):.2f}")
             print(f"   응답 완성도: {confidence_evaluation.get('response_completeness', 0):.2f}")
-            print(f"⏱ confidence_calculator 소요: {(_t.time()-_ts)*1000:.1f}ms")
             
         except Exception as e:
             print(f"❌ 신뢰도 계산 오류: {e}")
@@ -497,8 +474,6 @@ class WorkflowRouter:
     def _analysis_agent_node(self, state: WorkflowState) -> WorkflowState:
         """분석 에이전트 노드 (async 처리 - RAG + 뉴스 통합)"""
         try:
-            import time as _t
-            _ts = _t.time()
             import asyncio
             import concurrent.futures
             
@@ -533,7 +508,6 @@ class WorkflowRouter:
                 print(f"📈 통합 투자 분석 완료: {result.get('stock_symbol', '일반')}")
                 print(f"   - RAG 컨텍스트: {result.get('rag_context_length', 0)} 글자")
                 print(f"   - 뉴스: {result.get('news_count', 0)}건")
-                print(f"⏱ analysis_agent 소요: {(_t.time()-_ts)*1000:.1f}ms")
             else:
                 state["error"] = result.get('error', 'analysis_agent 실패')
                 
@@ -550,12 +524,7 @@ class WorkflowRouter:
         def handle_success(s, r):
             s["news_data"] = r['news_data']
             s["news_analysis"] = r['analysis_result']
-            # Fast-path 여부 기록(있으면 바로 응답으로 보낼 수 있음)
-            if r.get('fast_path'):
-                s["news_fast_path"] = True
             print(f"📰 뉴스 수집 및 분석 완료: {len(r['news_data'])}건")
-        import time as _t
-        _ts = _t.time()
         
         # NewsAgent가 async이므로 동기적으로 실행
         try:
@@ -584,7 +553,6 @@ class WorkflowRouter:
                 handle_success(state, result)
             else:
                 state["error"] = result.get('error', 'news_agent 실패')
-            print(f"⏱ news_agent 소요: {(_t.time()-_ts)*1000:.1f}ms")
                 
         except Exception as e:
             print(f"❌ news_agent 오류: {e}")
@@ -593,15 +561,6 @@ class WorkflowRouter:
             state["error"] = f"news_agent 오류: {str(e)}"
         
         return state
-
-    def _route_after_news(self, state: WorkflowState) -> str:
-        """뉴스 에이전트 후 라우팅 - Fast-path면 바로 응답"""
-        # Fast-path 플래그가 있고 다른 데이터가 섞이지 않았다면 바로 응답으로
-        if state.get("news_fast_path"):
-            has_other = bool(state.get("financial_data")) or bool(state.get("knowledge_context")) or bool(state.get("chart_data")) or bool(state.get("analysis_result"))
-            if not has_other:
-                return "response_agent"
-        return "result_combiner"
     
     def _knowledge_agent_node(self, state: WorkflowState) -> WorkflowState:
         """지식 에이전트 노드"""
@@ -624,8 +583,6 @@ class WorkflowRouter:
     def _response_agent_node(self, state: WorkflowState) -> WorkflowState:
         """응답 에이전트 노드"""
         try:
-            import time as _t
-            _ts = _t.time()
             # 디버그: state 키 확인
             print(f"🔍 response_agent_node state 키: {list(state.keys())}")
             print(f"   financial_data 있음: {'financial_data' in state}")
@@ -641,7 +598,6 @@ class WorkflowRouter:
             if combined_result.get("combined_response"):
                 state["final_response"] = combined_result["combined_response"]
                 print(f"💬 메타 에이전트 통합 응답 사용")
-                print(f"⏱ response_agent 소요: {(_t.time()-_ts)*1000:.1f}ms")
                 return state
             
             # 통합 결과가 없으면 기존 방식으로 응답 생성
@@ -669,7 +625,6 @@ class WorkflowRouter:
             if result['success']:
                 state["final_response"] = result['final_response']
                 print(f"💬 기본 응답 생성 완료")
-                print(f"⏱ response_agent 소요: {(_t.time()-_ts)*1000:.1f}ms")
             else:
                 state["error"] = result.get('error', '응답 생성 실패')
                 
@@ -728,11 +683,6 @@ class WorkflowRouter:
             any(keyword in user_query for keyword in ["주가", "가격", "시세", "현재가", "stock", "price"])):
             print(f"⚡ 단순 주가 조회 감지 - 메타 에이전트 건너뛰기")
             return "data_agent"
-
-        # 단순 지식 질문은 바로 knowledge_agent로 (메타 에이전트 건너뛰기)
-        if (primary_intent == "knowledge" and complexity == "simple"):
-            print(f"⚡ 단순 지식 질문 감지 - 메타 에이전트 건너뛰기")
-            return "knowledge_agent"
         
         # 일반 인사는 바로 response_agent로
         if primary_intent == "general" and any(keyword in user_query for keyword in ["안녕", "hello", "hi"]):
