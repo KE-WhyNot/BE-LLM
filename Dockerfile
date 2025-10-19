@@ -16,7 +16,8 @@ COPY requirements.txt .
 
 # Python 의존성 설치
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir gunicorn
 
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('kakaobank/kf-deberta-base')"
 
@@ -30,6 +31,5 @@ EXPOSE 8000
 ENV PYTHONPATH=/app
 ENV CHROMA_PERSIST_DIRECTORY=/tmp/chroma_db
 
-# 애플리케이션 실행
-# CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
-CMD ["/bin/sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# 애플리케이션 실행 (gunicorn with uvicorn workers)
+CMD ["gunicorn", "app.main:app", "-w", "8", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "300", "--keep-alive", "2", "--max-requests", "1000", "--max-requests-jitter", "100", "--worker-connections", "1000"]
