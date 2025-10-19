@@ -32,7 +32,7 @@ class FinancialWorkflowService:
             self.intelligent_workflow_router = None
             print("❌ 메타 에이전트 워크플로우를 사용할 수 없습니다")
     
-    def process_query(self, user_query: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+    async def process_query(self, user_query: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         """사용자 쿼리 처리 - 메인 진입점"""
         try:
             # 메타 에이전트 워크플로우 사용 (우선)
@@ -40,7 +40,7 @@ class FinancialWorkflowService:
                 print(f"🤖 메타 에이전트 기반 지능형 워크플로우 사용")
                 print(f"   ✨ 복잡도 분석 → 서비스 계획 → 병렬 실행 → 결과 통합 → 신뢰도 평가")
                 
-                result = self.intelligent_workflow_router.process_query(
+                result = await self.intelligent_workflow_router.process_query(
                     user_query=user_query,
                     user_id=user_id
                 )

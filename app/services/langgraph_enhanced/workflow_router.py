@@ -6,6 +6,7 @@ LangGraph 워크플로우 라우터
 
 from typing import Dict, Any, TypedDict, List, Optional
 from datetime import datetime
+import time
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from langsmith import traceable
@@ -170,21 +171,28 @@ class WorkflowRouter:
         return workflow.compile()
     
     @traceable(name="query_analyzer_step")
-    def _query_analyzer_node(self, state: WorkflowState) -> WorkflowState:
+    async def _query_analyzer_node(self, state: WorkflowState) -> WorkflowState:
         """쿼리 분석 노드"""
+        start_time = time.time()
+        print(f"🔄 [WorkflowRouter] QueryAnalyzer 노드 시작")
+        
         try:
             user_query = state["user_query"]
             analyzer = self.agents["query_analyzer"]
             
-            query_analysis = analyzer.process(user_query)
+            query_analysis = await analyzer.process(user_query)
             state["query_analysis"] = query_analysis
             state["next_agent"] = query_analysis.get("next_agent", "response_agent")
             
+            node_time = (time.time() - start_time) * 1000
+            print(f"🔄 [WorkflowRouter] QueryAnalyzer 노드 완료 - {node_time:.1f}ms")
             print(f"🔍 쿼리 분석 완료: {query_analysis['primary_intent']} (신뢰도: {query_analysis['confidence']:.2f})")
             print(f"   근거: {query_analysis['reasoning']}")
             print(f"   다음 에이전트: {state['next_agent']}")
             
         except Exception as e:
+            node_time = (time.time() - start_time) * 1000
+            print(f"🔄 [WorkflowRouter] QueryAnalyzer 노드 오류 - {node_time:.1f}ms | {str(e)}")
             print(f"❌ 쿼리 분석 에이전트 오류: {e}")
             state["error"] = f"쿼리 분석 중 오류: {str(e)}"
             state["next_agent"] = "error_handler"
@@ -192,14 +200,20 @@ class WorkflowRouter:
         return state
     
     @traceable(name="service_planner_step")
-    def _service_planner_node(self, state: WorkflowState) -> WorkflowState:
+    async def _service_planner_node(self, state: WorkflowState) -> WorkflowState:
         """서비스 계획 노드 - 복잡도 분석 및 실행 전략 수립"""
+        start_time = time.time()
+        print(f"🔄 [WorkflowRouter] ServicePlanner 노드 시작")
+        
         try:
             user_query = state["user_query"]
             query_analysis = state["query_analysis"]
             
             # 서비스 플래너로 실행 전략 수립
-            planner_result = self.service_planner.process(user_query, query_analysis)
+            planner_start = time.time()
+            planner_result = await self.service_planner.process(user_query, query_analysis)
+            planner_time = (time.time() - planner_start) * 1000
+            print(f"🔄 [WorkflowRouter] ServicePlanner 처리 완료 - {planner_time:.1f}ms")
             
             if planner_result.get('success') and 'strategy' in planner_result:
                 strategy = planner_result['strategy']
@@ -451,12 +465,12 @@ class WorkflowRouter:
     
     # ========== 공통 에이전트 실행 함수 (중복 제거) ==========
     
-    def _execute_agent(self, agent_name: str, state: WorkflowState, 
+    async def _execute_agent(self, agent_name: str, state: WorkflowState, 
                       success_handler=None) -> WorkflowState:
         """공통 에이전트 실행 로직"""
         try:
             agent = self.agents[agent_name]
-            result = agent.process(state["user_query"], state["query_analysis"])
+            result = await agent.process(state["user_query"], state["query_analysis"])
             
             if result['success']:
                 if success_handler:
@@ -471,7 +485,7 @@ class WorkflowRouter:
         return state
     
     @traceable(name="data_agent_step")
-    def _data_agent_node(self, state: WorkflowState) -> WorkflowState:
+    async def _data_agent_node(self, state: WorkflowState) -> WorkflowState:
         """데이터 에이전트 노드"""
         def handle_success(s, r):
             s["financial_data"] = r['data']
@@ -485,31 +499,14 @@ class WorkflowRouter:
                     run_tree.add_metadata({"response_type": "simple_stock_price", "bypassed_response_agent": True})
             else:
                 print(f"📊 데이터 조회 완료")
-        return self._execute_agent("data_agent", state, handle_success)
+        return await self._execute_agent("data_agent", state, handle_success)
     
-    def _analysis_agent_node(self, state: WorkflowState) -> WorkflowState:
+    async def _analysis_agent_node(self, state: WorkflowState) -> WorkflowState:
         """분석 에이전트 노드 (async 처리 - RAG + 뉴스 통합)"""
         try:
-            import asyncio
-            import concurrent.futures
-            
             agent = self.agents["analysis_agent"]
             
-            # 동기 함수에서 비동기 함수 실행
-            # 이미 실행 중인 이벤트 루프가 있으므로 새 스레드에서 실행
-            def run_async_in_thread():
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(
-                        agent.process(state["user_query"], state["query_analysis"])
-                    )
-                finally:
-                    new_loop.close()
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(run_async_in_thread)
-                result = future.result(timeout=60)  # 60초 타임아웃
+            result = await agent.process(state["user_query"], state["query_analysis"])
             
             if result['success']:
                 state["analysis_result"] = result['analysis_result']
@@ -535,35 +532,19 @@ class WorkflowRouter:
         
         return state
     
-    def _news_agent_node(self, state: WorkflowState) -> WorkflowState:
-        """뉴스 에이전트 노드 (async 처리 - sync wrapper)"""
+    async def _news_agent_node(self, state: WorkflowState) -> WorkflowState:
+        """뉴스 에이전트 노드 (async 처리)"""
+        start_time = time.time()
+        print(f"🔄 [WorkflowRouter] NewsAgent 노드 시작")
+        
         def handle_success(s, r):
             s["news_data"] = r['news_data']
             s["news_analysis"] = r['analysis_result']
             print(f"📰 뉴스 수집 및 분석 완료: {len(r['news_data'])}건")
         
-        # NewsAgent가 async이므로 동기적으로 실행
         try:
-            import asyncio
             agent = self.agents["news_agent"]
-            
-            # 현재 이벤트 루프가 실행 중인지 확인
-            try:
-                loop = asyncio.get_running_loop()
-                # 이미 루프가 실행 중이면 run_until_complete 사용 불가
-                # 대신 동기 방식으로 처리
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        asyncio.run,
-                        agent.process(state["user_query"], state["query_analysis"])
-                    )
-                    result = future.result(timeout=60)  # 60초 타임아웃
-            except RuntimeError:
-                # 루프가 실행 중이지 않으면 새로 만들어서 실행
-                result = asyncio.run(
-                    agent.process(state["user_query"], state["query_analysis"])
-                )
+            result = await agent.process(state["user_query"], state["query_analysis"])
                 
             if result['success']:
                 handle_success(state, result)
@@ -571,21 +552,33 @@ class WorkflowRouter:
                 state["error"] = result.get('error', 'news_agent 실패')
                 
         except Exception as e:
+            node_time = (time.time() - start_time) * 1000
+            print(f"🔄 [WorkflowRouter] NewsAgent 노드 오류 - {node_time:.1f}ms | {str(e)}")
             print(f"❌ news_agent 오류: {e}")
             import traceback
             traceback.print_exc()
             state["error"] = f"news_agent 오류: {str(e)}"
         
+        finally:
+            node_time = (time.time() - start_time) * 1000
+            print(f"🔄 [WorkflowRouter] NewsAgent 노드 완료 - {node_time:.1f}ms")
+        
         return state
     
-    def _knowledge_agent_node(self, state: WorkflowState) -> WorkflowState:
+    async def _knowledge_agent_node(self, state: WorkflowState) -> WorkflowState:
         """지식 에이전트 노드"""
+        start_time = time.time()
+        print(f"🔄 [WorkflowRouter] KnowledgeAgent 노드 시작")
+        
         def handle_success(s, r):
             s["knowledge_context"] = r['explanation_result']
             print(f"📚 지식 교육 완료: {r.get('concept', '일반')}")
-        return self._execute_agent("knowledge_agent", state, handle_success)
+        result = await self._execute_agent("knowledge_agent", state, handle_success)
+        node_time = (time.time() - start_time) * 1000
+        print(f"🔄 [WorkflowRouter] KnowledgeAgent 노드 완료 - {node_time:.1f}ms")
+        return result
     
-    def _visualization_agent_node(self, state: WorkflowState) -> WorkflowState:
+    async def _visualization_agent_node(self, state: WorkflowState) -> WorkflowState:
         """시각화 에이전트 노드"""
         def handle_success(s, r):
             s["chart_data"] = r['chart_data']
@@ -593,10 +586,10 @@ class WorkflowRouter:
             if r.get('chart_image'):
                 s["chart_image"] = r['chart_image']
             print(f"📊 차트 생성 및 분석 완료")
-        return self._execute_agent("visualization_agent", state, handle_success)
+        return await self._execute_agent("visualization_agent", state, handle_success)
     
     @traceable(name="response_agent_step")
-    def _response_agent_node(self, state: WorkflowState) -> WorkflowState:
+    async def _response_agent_node(self, state: WorkflowState) -> WorkflowState:
         """응답 에이전트 노드"""
         try:
             # 디버그: state 키 확인
@@ -632,7 +625,7 @@ class WorkflowRouter:
             print(f"   - analysis_result: {bool(collected_data['analysis_result'])}")
             print(f"   - news_data: {len(collected_data.get('news_data', []))}")
             
-            result = self.agents["response_agent"].process(
+            result = await self.agents["response_agent"].process(
                 state["user_query"], 
                 state["query_analysis"], 
                 collected_data
@@ -781,7 +774,7 @@ class WorkflowRouter:
         return "response_agent"
     
     @traceable(name="intelligent_workflow", run_type="chain", metadata={"workflow_type": "meta_agent_enhanced"})
-    def process_query(self, user_query: str, user_id: str = None) -> Dict[str, Any]:
+    async def process_query(self, user_query: str, user_id: str = None) -> Dict[str, Any]:
         """사용자 쿼리 처리"""
         try:
             # 초기 상태 설정
@@ -804,8 +797,8 @@ class WorkflowRouter:
                 agent_history=[]
             )
             
-            # 워크플로우 실행
-            result = self.workflow.invoke(initial_state)
+            # 워크플로우 실행 (비동기)
+            result = await self.workflow.ainvoke(initial_state)
             
             # 디버그: result 타입 확인
             print(f"\n🔍 workflow.invoke 결과 타입: {type(result)}")

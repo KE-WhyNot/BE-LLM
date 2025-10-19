@@ -4,6 +4,7 @@
 """
 
 from typing import Dict, Any, List, Optional
+import time
 from .base_agent import BaseAgent
 from app.services.workflow_components import news_service
 
@@ -235,6 +236,9 @@ focus_areas: [값]"""
     
     async def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
         """뉴스 에이전트 처리 (async) - Fast-path 지원"""
+        start_time = time.time()
+        print(f"📰 [NewsAgent] 시작 - {user_query[:50]}...")
+        
         try:
             self.log(f"뉴스 수집 시작: {user_query}")
             
@@ -246,9 +250,15 @@ focus_areas: [값]"""
             if is_simple_news:
                 print("⚡ News Fast-path: 단순 뉴스 질의 감지 - 전략 LLM 생략")
                 # Fast-path: 바로 뉴스 수집
+                fast_path_start = time.time()
                 news_data = await self._collect_news_fast_path(user_query)
+                fast_path_time = (time.time() - fast_path_start) * 1000
+                print(f"📰 [NewsAgent] Fast-path 뉴스 수집 완료 - {fast_path_time:.1f}ms")
+                
                 if news_data:
                     simple_response = self._format_simple_news_response(news_data)
+                    total_time = (time.time() - start_time) * 1000
+                    print(f"📰 [NewsAgent] Fast-path 전체 완료 - {total_time:.1f}ms | 뉴스 {len(news_data)}개")
                     return {
                         'success': True,
                         'news_data': news_data,
@@ -258,6 +268,7 @@ focus_areas: [값]"""
                     }
             
             # 일반 경로: LLM이 뉴스 수집 전략 결정
+            strategy_start = time.time()
             prompt = self.get_prompt_template().format(
                 user_query=user_query,
                 primary_intent=query_analysis.get('primary_intent', 'news'),
@@ -265,8 +276,10 @@ focus_areas: [값]"""
                 required_services=query_analysis.get('required_services', [])
             )
             
-            response = self.llm.invoke(prompt)
+            response = await self.llm.ainvoke(prompt)
             strategy = self.parse_news_strategy(response.content.strip())
+            strategy_time = (time.time() - strategy_start) * 1000
+            print(f"📰 [NewsAgent] 전략 결정 완료 - {strategy_time:.1f}ms")
             
             print(f"🔍 [NewsAgent] 생성된 전략:")
             print(f"   - search_strategy: {strategy.get('search_strategy')}")
@@ -320,7 +333,7 @@ focus_areas: [값]"""
                 if mk_context:
                     analysis_prompt += f"\n\n{mk_context}"
                 
-                analysis_response = self.llm.invoke(analysis_prompt)
+                analysis_response = await self.llm.ainvoke(analysis_prompt)
                 analysis_result = analysis_response.content
                 
                 self.log(f"뉴스 분석 완료: {len(news_data or [])}건")
@@ -337,6 +350,8 @@ focus_areas: [값]"""
             }
             
         except Exception as e:
+            total_time = (time.time() - start_time) * 1000
+            print(f"📰 [NewsAgent] 오류 발생 - {total_time:.1f}ms | {str(e)}")
             self.log(f"뉴스 에이전트 오류: {e}")
             return {
                 'success': False,
@@ -344,6 +359,10 @@ focus_areas: [값]"""
                 'news_data': [],
                 'analysis_result': "뉴스 수집에 실패했습니다."
             }
+        
+        finally:
+            total_time = (time.time() - start_time) * 1000
+            print(f"📰 [NewsAgent] 전체 완료 - {total_time:.1f}ms")
     
     def _extract_korean_keyword(self, user_query: str) -> str:
         """한국어 쿼리에서 핵심 키워드 추출

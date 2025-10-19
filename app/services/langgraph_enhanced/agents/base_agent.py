@@ -23,7 +23,7 @@ class BaseAgent(ABC):
         pass
     
     @abstractmethod
-    def process(self, **kwargs) -> Dict[str, Any]:
+    async def process(self, **kwargs) -> Dict[str, Any]:
         """에이전트 처리 로직"""
         pass
     

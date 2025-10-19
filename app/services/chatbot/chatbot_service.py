@@ -35,7 +35,7 @@ class FinancialChatbotService:
                 return self._create_error_response("메시지를 입력해주세요.")
             
             # LangGraph 워크플로우로 일원화 라우팅 (자동 워크플로우 선택)
-            result = self.financial_workflow.process_query(
+            result = await self.financial_workflow.process_query(
                 user_message,
                 user_id=request.user_id
             )

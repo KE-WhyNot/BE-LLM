@@ -11,7 +11,7 @@ class FinancialDataService:
     def __init__(self):
         pass
     
-    def get_financial_data(self, query: str) -> Dict[str, Any]:
+    async def get_financial_data(self, query: str) -> Dict[str, Any]:
         """쿼리에서 심볼을 추출하고 금융 데이터를 조회
         
         Args:
@@ -39,8 +39,8 @@ class FinancialDataService:
                 if not symbol:
                     return {"error": f"'{query}' 종목을 찾을 수 없습니다. 정확한 종목명이나 티커 심볼을 입력해주세요."}
             
-            # 외부 API 서비스를 통한 데이터 조회
-            data = external_api_service.get_stock_data(symbol)
+            # 외부 API 서비스를 통한 데이터 조회 (비동기)
+            data = await external_api_service.get_stock_data(symbol)
             if "error" in data:
                 return data
             

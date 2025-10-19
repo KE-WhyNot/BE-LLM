@@ -209,7 +209,7 @@ optimization_tips: [값]"""
         except:
             return []
     
-    def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
         """서비스 전략 계획"""
         try:
             # 프롬프트 생성
@@ -222,7 +222,7 @@ optimization_tips: [값]"""
             )
             
             # LLM 호출
-            response = self.llm.invoke(prompt)
+            response = await self.llm.ainvoke(prompt)
             
             # 응답 파싱
             strategy = self.parse_response(response.content)

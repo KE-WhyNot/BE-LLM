@@ -165,15 +165,15 @@ requires_deep_analysis: [값]"""
                 'requires_deep_analysis': False
             }
     
-    def process(self, user_query: str, query_analysis: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def process(self, user_query: str, query_analysis: Dict[str, Any] = None) -> Dict[str, Any]:
         """BaseAgent 인터페이스 구현 (detect 호출)"""
-        return self.detect(user_query)
+        return await self.detect(user_query)
     
-    def detect(self, user_query: str) -> Dict[str, Any]:
+    async def detect(self, user_query: str) -> Dict[str, Any]:
         """투자 의도 감지"""
         try:
             prompt = self.get_prompt_template().format(user_query=user_query)
-            response = self.llm.invoke(prompt)
+            response = await self.llm.ainvoke(prompt)
             result = self.parse_response(response.content.strip())
             
             self.log(f"투자 의도 감지: {result['is_investment_question']} (신뢰도: {result['confidence']:.2f})")
