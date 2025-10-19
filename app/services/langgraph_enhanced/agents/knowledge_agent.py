@@ -4,6 +4,7 @@
 """
 
 from typing import Dict, Any, List, Optional
+import time
 from .base_agent import BaseAgent
 from app.services.pinecone_rag_service import search_pinecone, get_context_for_query
 from app.services.pinecone_config import KNOWLEDGE_NAMESPACES, NAMESPACE_DESCRIPTIONS
@@ -327,7 +328,7 @@ related_topics: [값]"""
         
         return "\n".join(formatted)
     
-    def _determine_namespace(self, user_query: str, query_analysis: Dict[str, Any]) -> str:
+    async def _determine_namespace(self, user_query: str, query_analysis: Dict[str, Any]) -> str:
         """쿼리 분석을 통해 적절한 네임스페이스 결정"""
         
         # LLM 기반 네임스페이스 분류
@@ -357,7 +358,7 @@ confidence: [0.0-1.0]
 reasoning: [선택한 이유]"""
 
         try:
-            response = self.llm.invoke(classification_prompt)
+            response = await self.llm.ainvoke(classification_prompt)
             response_text = response.content.strip()
             
             # 파싱
@@ -380,13 +381,13 @@ reasoning: [선택한 이유]"""
             self.log(f"네임스페이스 결정 오류: {e}, 기본값 사용")
             return self.namespaces["terminology"]
     
-    def _get_rag_context(self, user_query: str, namespace: str, top_k: int = 5) -> str:
+    async def _get_rag_context(self, user_query: str, namespace: str, top_k: int = 5) -> str:
         """특정 네임스페이스에서 RAG 컨텍스트 가져오기"""
         try:
             self.log(f"RAG 검색 시작: {namespace} (top_k={top_k})")
             
             # Pinecone에서 검색
-            context = get_context_for_query(
+            context = await get_context_for_query(
                 query=user_query,
                 top_k=top_k,
                 namespace=namespace
@@ -403,7 +404,7 @@ reasoning: [선택한 이유]"""
             self.log(f"RAG 검색 오류: {e}")
             return ""
     
-    def _get_simple_knowledge_response(self, user_query: str) -> str:
+    async def _get_simple_knowledge_response(self, user_query: str) -> str:
         """Fast-path 지식 응답: 간단한 질문에 대한 빠른 답변"""
         try:
             # 1. 내장 지식 DB에서 직접 검색
@@ -439,8 +440,8 @@ reasoning: [선택한 이유]"""
                 return "\n".join(response_parts)
             
             # 2. RAG로 빠른 검색
-            namespace = self._determine_namespace_simple(user_query)
-            rag_context = self._get_rag_context(user_query, namespace, top_k=3)
+            namespace = await self._determine_namespace_simple(user_query)
+            rag_context = await self._get_rag_context(user_query, namespace, top_k=3)
             
             if rag_context:
                 print(f"⚡ Fast-path RAG 검색: {namespace}")
@@ -454,7 +455,7 @@ reasoning: [선택한 이유]"""
 
 간단하고 명확한 답변을 3-4문장으로 작성해주세요."""
                 
-                response = self.llm.invoke(summary_prompt)
+                response = await self.llm.ainvoke(summary_prompt)
                 return response.content.strip()
             
             return "해당 질문에 대한 정보를 찾을 수 없습니다."
@@ -463,7 +464,7 @@ reasoning: [선택한 이유]"""
             print(f"⚠️ Fast-path 지식 검색 실패: {e}")
             return ""
     
-    def _determine_namespace_simple(self, user_query: str) -> str:
+    async def _determine_namespace_simple(self, user_query: str) -> str:
         """간단한 네임스페이스 결정 (키워드 기반)"""
         query_lower = user_query.lower()
         
@@ -479,8 +480,11 @@ reasoning: [선택한 이유]"""
         else:
             return 'terminology'  # 기본값
     
-    def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
         """지식 에이전트 처리 (네임스페이스 라우팅) - Fast-path 지원"""
+        start_time = time.time()
+        print(f"📚 [KnowledgeAgent] 시작 - {user_query[:50]}...")
+        
         try:
             self.log(f"지식 교육 시작: {user_query}")
             
@@ -492,8 +496,14 @@ reasoning: [선택한 이유]"""
             if is_simple_knowledge:
                 print("⚡ Knowledge Fast-path: 단순 지식 질의 감지 - 전략 LLM 생략")
                 # Fast-path: 바로 지식 검색 및 간단한 설명
-                simple_response = self._get_simple_knowledge_response(user_query)
+                fast_path_start = time.time()
+                simple_response = await self._get_simple_knowledge_response(user_query)
+                fast_path_time = (time.time() - fast_path_start) * 1000
+                print(f"📚 [KnowledgeAgent] Fast-path 지식 검색 완료 - {fast_path_time:.1f}ms")
+                
                 if simple_response:
+                    total_time = (time.time() - start_time) * 1000
+                    print(f"📚 [KnowledgeAgent] Fast-path 전체 완료 - {total_time:.1f}ms")
                     return {
                         'success': True,
                         'explanation_result': simple_response,
@@ -502,12 +512,19 @@ reasoning: [선택한 이유]"""
                     }
             
             # 일반 경로: 1. 네임스페이스 결정
-            namespace = self._determine_namespace(user_query, query_analysis)
+            namespace_start = time.time()
+            namespace = await self._determine_namespace(user_query, query_analysis)
+            namespace_time = (time.time() - namespace_start) * 1000
+            print(f"📚 [KnowledgeAgent] 네임스페이스 결정 완료 - {namespace_time:.1f}ms | {namespace}")
             
             # 2. RAG 컨텍스트 가져오기
-            rag_context = self._get_rag_context(user_query, namespace, top_k=5)
+            rag_start = time.time()
+            rag_context = await self._get_rag_context(user_query, namespace, top_k=5)
+            rag_time = (time.time() - rag_start) * 1000
+            print(f"📚 [KnowledgeAgent] RAG 컨텍스트 검색 완료 - {rag_time:.1f}ms")
             
             # 3. LLM이 교육 전략 결정
+            strategy_start = time.time()
             prompt = self.get_prompt_template().format(
                 user_query=user_query,
                 primary_intent=query_analysis.get('primary_intent', 'knowledge'),
@@ -515,8 +532,10 @@ reasoning: [선택한 이유]"""
                 required_services=query_analysis.get('required_services', [])
             )
             
-            response = self.llm.invoke(prompt)
+            response = await self.llm.ainvoke(prompt)
             strategy = self.parse_education_strategy(response.content.strip())
+            strategy_time = (time.time() - strategy_start) * 1000
+            print(f"📚 [KnowledgeAgent] 교육 전략 결정 완료 - {strategy_time:.1f}ms")
             
             # 4. 설명 생성
             if rag_context:
@@ -543,7 +562,7 @@ reasoning: [선택한 이유]"""
 
 명확하고 구체적으로 설명해주세요."""
                 
-                explanation_response = self.llm.invoke(explanation_prompt)
+                explanation_response = await self.llm.ainvoke(explanation_prompt)
                 explanation_result = explanation_response.content
                 
                 self.log(f"RAG 기반 지식 교육 완료")
@@ -562,8 +581,14 @@ reasoning: [선택한 이유]"""
 
 명확하고 친절하게 설명해주세요."""
                 
-                explanation_response = self.llm.invoke(explanation_prompt)
+                explanation_response = await self.llm.ainvoke(explanation_prompt)
                 explanation_result = explanation_response.content
+            
+            explanation_time = (time.time() - explanation_start) * 1000
+            print(f"📚 [KnowledgeAgent] 설명 생성 완료 - {explanation_time:.1f}ms")
+            
+            total_time = (time.time() - start_time) * 1000
+            print(f"📚 [KnowledgeAgent] 전체 완료 - {total_time:.1f}ms | namespace={namespace}")
             
             return {
                 'success': True,
@@ -574,6 +599,8 @@ reasoning: [선택한 이유]"""
             }
             
         except Exception as e:
+            total_time = (time.time() - start_time) * 1000
+            print(f"📚 [KnowledgeAgent] 오류 발생 - {total_time:.1f}ms | {str(e)}")
             self.log(f"지식 에이전트 오류: {e}")
             import traceback
             traceback.print_exc()

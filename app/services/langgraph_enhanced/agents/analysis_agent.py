@@ -4,6 +4,7 @@
 """
 
 from typing import Dict, Any, List, Optional
+import time
 from .base_agent import BaseAgent
 from app.services.workflow_components import financial_data_service, news_service
 from app.services.pinecone_rag_service import get_context_for_query
@@ -184,9 +185,10 @@ recommendation_style: [값]"""
 
 ## 응답 형식
 **중요 작성 규칙**:
-1. 마크다운 기호(*, -, #, ### 등)를 사용하지 마세요.
+1. 마크다운 기호(*, -, #, ###, ** 등)를 절대 사용하지 마세요.
 2. 이모지와 들여쓰기로 구조화하세요.
 3. 숫자와 데이터는 구체적으로 제시하되, 투자 권유는 신중하게 작성하세요.
+4. 모든 마크다운 문법을 완전히 제거하고 일반 텍스트로만 작성하세요.
 
 ## 중요 주의사항
 ⚠️ 면책조항: 이 분석은 참고용이며, 투자 권유가 아닙니다.
@@ -214,10 +216,14 @@ recommendation_style: [값]"""
     
     async def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
         """분석 에이전트 처리 (RAG + 뉴스 통합)"""
+        start_time = time.time()
+        print(f"📈 [AnalysisAgent] 시작 - {user_query[:50]}...")
+        
         try:
             self.log(f"투자 분석 시작: {user_query}")
             
             # LLM이 분석 전략 결정
+            strategy_start = time.time()
             prompt = self.get_prompt_template().format(
                 user_query=user_query,
                 primary_intent=query_analysis.get('primary_intent', 'analysis'),
@@ -225,26 +231,32 @@ recommendation_style: [값]"""
                 required_services=query_analysis.get('required_services', [])
             )
             
-            response = self.llm.invoke(prompt)
+            response = await self.llm.ainvoke(prompt)
             strategy = self.parse_analysis_strategy(response.content.strip())
+            strategy_time = (time.time() - strategy_start) * 1000
+            print(f"📈 [AnalysisAgent] 전략 결정 완료 - {strategy_time:.1f}ms")
             
             # 종목명 추출
             stock_symbol = self._extract_stock_symbol(user_query)
             stock_name = self._extract_stock_name(user_query)
             
             # 1. 실시간 금융 데이터 수집
+            data_start = time.time()
             financial_data = {}
             if stock_symbol:
                 try:
-                    financial_data = financial_data_service.get_financial_data(stock_symbol)
+                    financial_data = await financial_data_service.get_financial_data(stock_symbol)
                     if "error" in financial_data:
                         self.log(f"실시간 데이터 수집 실패: {financial_data['error']}")
                         financial_data = {}
                 except Exception as e:
                     self.log(f"실시간 데이터 수집 오류: {e}")
                     financial_data = {}
+            data_time = (time.time() - data_start) * 1000
+            print(f"📈 [AnalysisAgent] 금융 데이터 수집 완료 - {data_time:.1f}ms")
             
             # 2. RAG에서 재무제표 데이터 가져오기 (한글 + 영어 모두 검색)
+            rag_start = time.time()
             rag_financial_context = ""
             if stock_name:
                 try:
@@ -256,13 +268,13 @@ recommendation_style: [값]"""
                     rag_query_en = f"{english_name} financial statement analysis"
                     
                     # 한글 검색
-                    rag_context_kr = get_context_for_query(
+                    rag_context_kr = await get_context_for_query(
                         query=rag_query_kr,
                         top_k=3,
                         namespace=KNOWLEDGE_NAMESPACES["financial_analysis"]
                     )
                     # 영어 검색
-                    rag_context_en = get_context_for_query(
+                    rag_context_en = await get_context_for_query(
                         query=rag_query_en,
                         top_k=3,
                         namespace=KNOWLEDGE_NAMESPACES["financial_analysis"]
@@ -283,7 +295,11 @@ recommendation_style: [값]"""
                 except Exception as e:
                     self.log(f"RAG 재무제표 검색 오류: {e}")
             
+            rag_time = (time.time() - rag_start) * 1000
+            print(f"📈 [AnalysisAgent] RAG 검색 완료 - {rag_time:.1f}ms")
+            
             # 3. 뉴스 데이터 가져오기
+            news_start = time.time()
             news_context = ""
             recent_news = []
             if stock_name:
@@ -315,7 +331,11 @@ recommendation_style: [값]"""
                     import traceback
                     traceback.print_exc()
             
+            news_time = (time.time() - news_start) * 1000
+            print(f"📈 [AnalysisAgent] 뉴스 수집 완료 - {news_time:.1f}ms")
+            
             # 4. 통합 분석 수행 (CoT 추가)
+            analysis_start = time.time()
             if financial_data or rag_financial_context or news_context:
                 # 뉴스 요약 (간단하게)
                 news_summary = ""
@@ -413,7 +433,7 @@ recommendation_style: [값]"""
 ✅ **균형성**: 호재와 악재의 **영향력을 비교 분석**하여 종합적인 판단 제시
 ✅ **실용성**: 실제 투자에 바로 활용 가능한 구체적 전략 제시"""
                 
-                analysis_response = self.llm.invoke(analysis_prompt)
+                analysis_response = await self.llm.ainvoke(analysis_prompt)
                 analysis_result = analysis_response.content
                 
                 self.log(f"통합 투자 분석 완료: {stock_symbol or stock_name}")
@@ -448,6 +468,8 @@ recommendation_style: [값]"""
             }
             
         except Exception as e:
+            total_time = (time.time() - start_time) * 1000
+            print(f"📈 [AnalysisAgent] 오류 발생 - {total_time:.1f}ms | {str(e)}")
             self.log(f"분석 에이전트 오류: {e}")
             import traceback
             traceback.print_exc()
@@ -456,6 +478,10 @@ recommendation_style: [값]"""
                 'error': f"투자 분석 중 오류: {str(e)}",
                 'analysis_result': "분석에 실패했습니다. 다시 시도해주세요."
             }
+        
+        finally:
+            total_time = (time.time() - start_time) * 1000
+            print(f"📈 [AnalysisAgent] 전체 완료 - {total_time:.1f}ms")
     
     def _format_financial_data(self, data: Dict[str, Any]) -> str:
         """금융 데이터 포맷팅"""

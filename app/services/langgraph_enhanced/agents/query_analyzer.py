@@ -4,6 +4,7 @@
 """
 
 from typing import Dict, Any
+import time
 from .base_agent import BaseAgent
 from .investment_intent_detector import InvestmentIntentDetector
 
@@ -208,17 +209,27 @@ next_agent: [값]"""
                 'next_agent': 'response_agent'
             }
     
-    def process(self, user_query: str) -> Dict[str, Any]:
+    async def process(self, user_query: str) -> Dict[str, Any]:
         """쿼리 분석 처리 (LLM 기반 투자 의도 감지)"""
+        start_time = time.time()
+        print(f"🔍 [QueryAnalyzer] 시작 - {user_query[:50]}...")
+        
         # 1. LLM 기반 투자 의도 감지 (별도 에이전트)
-        investment_intent = self.investment_detector.detect(user_query)
+        investment_start = time.time()
+        investment_intent = await self.investment_detector.detect(user_query)
+        investment_time = (time.time() - investment_start) * 1000
+        print(f"🔍 [QueryAnalyzer] 투자 의도 감지 완료 - {investment_time:.1f}ms")
+        
         is_investment_question = investment_intent['is_investment_question']
         requires_deep_analysis = investment_intent['requires_deep_analysis']
         
         # 2. 일반 쿼리 분석
+        analysis_start = time.time()
         prompt = self.get_prompt_template().format(user_query=user_query)
-        response = self.llm.invoke(prompt)
+        response = await self.llm.ainvoke(prompt)
         analysis_result = self.parse_response(response.content.strip())
+        analysis_time = (time.time() - analysis_start) * 1000
+        print(f"🔍 [QueryAnalyzer] 쿼리 분석 완료 - {analysis_time:.1f}ms")
         
         # 3. 투자 의도 정보 통합
         analysis_result['is_investment_question'] = is_investment_question
@@ -243,39 +254,8 @@ next_agent: [값]"""
             self.log(f"💡 투자 질문 감지 (신뢰도: {investment_intent['confidence']:.2f})")
             self.log(f"   {investment_intent['reasoning']}")
         
-        return analysis_result
-
-
-        is_investment_question = investment_intent['is_investment_question']
-        requires_deep_analysis = investment_intent['requires_deep_analysis']
-        
-        # 2. 일반 쿼리 분석
-        prompt = self.get_prompt_template().format(user_query=user_query)
-        response = self.llm.invoke(prompt)
-        analysis_result = self.parse_response(response.content.strip())
-        
-        # 3. 투자 의도 정보 통합
-        analysis_result['is_investment_question'] = is_investment_question
-        analysis_result['investment_detection'] = investment_intent
-        
-        # 4. 투자 질문이면 복잡도 상향 및 analysis 서비스 추가
-        if is_investment_question:
-            # 복잡도 상향 (최소 moderate)
-            if analysis_result.get('complexity_level') == 'simple':
-                analysis_result['complexity_level'] = 'moderate'
-            
-            # 깊은 분석 필요하면 complex로
-            if requires_deep_analysis and analysis_result.get('complexity_level') != 'complex':
-                analysis_result['complexity_level'] = 'moderate'  # moderate로 설정 (너무 무거우면 안됨)
-            
-            # 필요 서비스에 analysis 추가
-            required_services = analysis_result.get('required_services', [])
-            if 'analysis' not in required_services:
-                required_services.append('analysis')
-                analysis_result['required_services'] = required_services
-            
-            self.log(f"💡 투자 질문 감지 (신뢰도: {investment_intent['confidence']:.2f})")
-            self.log(f"   {investment_intent['reasoning']}")
+        total_time = (time.time() - start_time) * 1000
+        print(f"🔍 [QueryAnalyzer] 전체 완료 - {total_time:.1f}ms | intent={analysis_result.get('primary_intent')} | complexity={analysis_result.get('complexity_level')}")
         
         return analysis_result
 

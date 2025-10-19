@@ -4,6 +4,7 @@
 """
 
 from typing import Dict, Any
+import time
 from .base_agent import BaseAgent
 from app.services.workflow_components import financial_data_service
 
@@ -147,21 +148,21 @@ additional_info: [값]"""
             volume = data.get('volume', 'N/A')
             currency_symbol = data.get('currency_symbol', '₩')  # 통화 심볼 가져오기
             
-            # 간단하고 친근한 응답 생성
+            # 간단하고 친근한 응답 생성 (마크다운 제거)
             response_parts = [
-                f"📊 **{stock_name}** 주가 정보",
+                f"📊 {stock_name} 주가 정보",
                 "",
-                f"💰 **현재가**: {currency_symbol}{current_price:,}" if isinstance(current_price, (int, float)) else f"💰 **현재가**: {currency_symbol}{current_price}",
+                f"💰 현재가: {currency_symbol}{current_price:,}" if isinstance(current_price, (int, float)) else f"💰 현재가: {currency_symbol}{current_price}",
             ]
             
             if change_rate != 'N/A' and change_amount != 'N/A':
                 change_symbol = "📈" if (isinstance(change_rate, (int, float)) and change_rate > 0) or (isinstance(change_amount, (int, float)) and change_amount > 0) else "📉"
                 change_rate_str = f"+{change_rate}%" if isinstance(change_rate, (int, float)) and change_rate > 0 else f"{change_rate}%"
                 change_amount_str = f"+{currency_symbol}{change_amount:,}" if isinstance(change_amount, (int, float)) and change_amount > 0 else f"{currency_symbol}{change_amount:,}"
-                response_parts.append(f"{change_symbol} **변동**: {change_rate_str} ({change_amount_str})")
+                response_parts.append(f"{change_symbol} 변동: {change_rate_str} ({change_amount_str})")
             
             if volume != 'N/A':
-                response_parts.append(f"📊 **거래량**: {volume:,}주" if isinstance(volume, (int, float)) else f"📊 **거래량**: {volume}")
+                response_parts.append(f"📊 거래량: {volume:,}주" if isinstance(volume, (int, float)) else f"📊 거래량: {volume}")
             
             # PER, PBR 추가
             pe_ratio = data.get('pe_ratio', 'N/A')
@@ -169,11 +170,11 @@ additional_info: [값]"""
             roe = data.get('roe', 'N/A')
             
             if pe_ratio != 'N/A' and pe_ratio != 'Unknown':
-                response_parts.append(f"📈 **PER**: {pe_ratio}배")
+                response_parts.append(f"📈 PER: {pe_ratio}배")
             if pbr != 'N/A' and pbr != 'Unknown':
-                response_parts.append(f"📊 **PBR**: {pbr}배")
+                response_parts.append(f"📊 PBR: {pbr}배")
             if roe != 'N/A' and roe != 'Unknown':
-                response_parts.append(f"💹 **ROE**: {roe}%")
+                response_parts.append(f"💹 ROE: {roe}%")
             
             response_parts.extend([
                 "",
@@ -186,12 +187,16 @@ additional_info: [값]"""
             print(f"❌ 간단한 주가 응답 생성 오류: {e}")
             return f"📊 주가 정보를 가져왔지만 표시 중 오류가 발생했습니다. 다시 시도해주세요."
     
-    def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
         """데이터 에이전트 처리"""
+        start_time = time.time()
+        print(f"📊 [DataAgent] 시작 - {user_query[:50]}...")
+        
         try:
             self.log(f"데이터 조회 시작: {user_query}")
             
             # LLM이 데이터 조회 전략 결정
+            strategy_start = time.time()
             prompt = self.get_prompt_template().format(
                 user_query=user_query,
                 primary_intent=query_analysis.get('primary_intent', 'unknown'),
@@ -199,11 +204,16 @@ additional_info: [값]"""
                 required_services=query_analysis.get('required_services', [])
             )
             
-            response = self.llm.invoke(prompt)
+            response = await self.llm.ainvoke(prompt)
             strategy = self.parse_data_strategy(response.content.strip())
+            strategy_time = (time.time() - strategy_start) * 1000
+            print(f"📊 [DataAgent] 전략 결정 완료 - {strategy_time:.1f}ms")
             
             # 실제 데이터 조회
-            data = financial_data_service.get_financial_data(strategy['data_query'])
+            data_start = time.time()
+            data = await financial_data_service.get_financial_data(strategy['data_query'])
+            data_time = (time.time() - data_start) * 1000
+            print(f"📊 [DataAgent] 데이터 조회 완료 - {data_time:.1f}ms")
             
             result = {
                 'success': "error" not in data,
@@ -227,9 +237,14 @@ additional_info: [값]"""
                 else:
                     result['is_simple_request'] = False
             
+            total_time = (time.time() - start_time) * 1000
+            print(f"📊 [DataAgent] 전체 완료 - {total_time:.1f}ms | {strategy['data_query']}")
+            
             return result
             
         except Exception as e:
+            total_time = (time.time() - start_time) * 1000
+            print(f"📊 [DataAgent] 오류 발생 - {total_time:.1f}ms | {str(e)}")
             self.log(f"데이터 에이전트 오류: {e}")
             return {
                 'success': False,

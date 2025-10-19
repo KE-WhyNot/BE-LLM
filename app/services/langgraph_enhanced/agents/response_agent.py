@@ -64,9 +64,10 @@ class ResponseAgent(BaseAgent):
 친근하고 전문적인 톤으로 작성하되, 이모지를 적절히 사용하여 가독성을 높이세요.
 
 **중요 작성 규칙**:
-1. 마크다운 기호(*, -, #, ### 등)를 사용하지 마세요.
+1. 마크다운 기호(*, -, #, ### 등)를 절대 사용하지 마세요.
 2. 이모지와 들여쓰기로 구조화하세요.
 3. 간결하고 깔끔하게 작성하세요.
+4. **, ###, * 등의 마크다운 문법을 완전히 제거하고 일반 텍스트로만 작성하세요.
 
 ## 예시 톤
 "안녕하세요! 삼성전자 주가 정보를 알려드릴게요.
@@ -78,7 +79,7 @@ class ResponseAgent(BaseAgent):
 
 이제 위의 지침에 따라 최적의 응답을 생성해주세요."""
     
-    def process(self, user_query: str, query_analysis: Dict[str, Any], collected_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, user_query: str, query_analysis: Dict[str, Any], collected_data: Dict[str, Any]) -> Dict[str, Any]:
         """응답 에이전트 처리"""
         try:
             # 금융 관련 여부 체크
@@ -127,7 +128,7 @@ class ResponseAgent(BaseAgent):
                 collected_information=collected_info
             )
             
-            response = self.llm.invoke(prompt)
+            response = await self.llm.ainvoke(prompt)
             final_response = response.content
             
             self.log("최종 응답 생성 완료")

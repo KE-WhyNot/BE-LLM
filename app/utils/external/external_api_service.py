@@ -20,7 +20,7 @@ class ExternalAPIService:
         # 뉴스 데이터 캐싱 (10분 TTL)
         self.news_cache = CacheManager(default_ttl=600)
     
-    def get_stock_data(self, symbol: str, period: str = "1mo") -> Dict[str, Any]:
+    async def get_stock_data(self, symbol: str, period: str = "1mo") -> Dict[str, Any]:
         """
         yfinance API를 통한 주식 데이터 조회 (캐싱 적용)
         
@@ -42,8 +42,10 @@ class ExternalAPIService:
         
         try:
             ticker = yf.Ticker(symbol)
-            hist = ticker.history(period=period)
-            info = ticker.info
+            # 비동기로 yfinance 호출
+            import asyncio
+            hist = await asyncio.to_thread(ticker.history, period=period)
+            info = await asyncio.to_thread(lambda: ticker.info)
             
             if hist.empty:
                 return {"error": f"{symbol}에 대한 데이터를 찾을 수 없습니다."}

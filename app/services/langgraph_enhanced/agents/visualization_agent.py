@@ -215,7 +215,7 @@ include_analysis: [값]"""
         
         return "\n".join(formatted)
     
-    def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, user_query: str, query_analysis: Dict[str, Any]) -> Dict[str, Any]:
         """시각화 에이전트 처리"""
         try:
             self.log(f"차트 생성 시작: {user_query}")
@@ -228,7 +228,7 @@ include_analysis: [값]"""
                 required_services=query_analysis.get('required_services', [])
             )
             
-            response = self.llm.invoke(prompt)
+            response = await self.llm.ainvoke(prompt)
             strategy = self.parse_visualization_strategy(response.content.strip())
             
             # 주식 심볼 추출 (stock_utils 사용 - 한국/미국 주식 모두 지원)
@@ -243,7 +243,7 @@ include_analysis: [값]"""
             if stock_symbol:
                 try:
                     # 금융 데이터 가져오기
-                    financial_data = financial_data_service.get_financial_data(stock_symbol)
+                    financial_data = await financial_data_service.get_financial_data(stock_symbol)
                     
                     if 'error' not in financial_data:
                         # 차트 생성 요청 (visualization_service 직접 사용)
@@ -280,7 +280,7 @@ include_analysis: [값]"""
             # 차트 분석
             if chart_data and 'error' not in chart_data and strategy.get('include_analysis', True):
                 analysis_prompt = self.generate_chart_analysis_prompt(chart_data, strategy, user_query)
-                analysis_response = self.llm.invoke(analysis_prompt)
+                analysis_response = await self.llm.ainvoke(analysis_prompt)
                 analysis_result = analysis_response.content
                 
                 self.log("차트 분석 완료")

@@ -77,7 +77,7 @@ def embed_text(text):
         return embeddings.cpu().numpy()[0]
 
 
-def search_pinecone(query: str, top_k: int = None, namespace: str = None):
+async def search_pinecone(query: str, top_k: int = None, namespace: str = None):
     """Pinecone에서 검색"""
     if top_k is None:
         top_k = TOP_K
@@ -88,7 +88,10 @@ def search_pinecone(query: str, top_k: int = None, namespace: str = None):
         index = get_pinecone_index()
         query_embedding = embed_text(query)
         
-        results = index.query(
+        # 비동기로 Pinecone 쿼리 실행
+        import asyncio
+        results = await asyncio.to_thread(
+            index.query,
             vector=query_embedding.tolist(),
             top_k=top_k,
             include_metadata=True,
@@ -101,10 +104,10 @@ def search_pinecone(query: str, top_k: int = None, namespace: str = None):
         return None
 
 
-def get_context_for_query(query: str, top_k: int = 5, namespace: str = None):
+async def get_context_for_query(query: str, top_k: int = 5, namespace: str = None):
     """쿼리에 대한 컨텍스트 반환 (namespace 지원)"""
     try:
-        results = search_pinecone(query, top_k=top_k, namespace=namespace)
+        results = await search_pinecone(query, top_k=top_k, namespace=namespace)
         
         # results가 None인 경우 처리
         if results is None:
@@ -159,10 +162,10 @@ class PineconeRAGService:
             print(f"❌ Pinecone RAG 서비스 초기화 실패: {e}")
             return False
     
-    def get_context_for_query(self, query: str, top_k: int = 5) -> str:
+    async def get_context_for_query(self, query: str, top_k: int = 5) -> str:
         """쿼리에 대한 컨텍스트 반환 (기존 시스템과 호환)"""
         try:
-            results = search_pinecone(query, top_k=top_k)
+            results = await search_pinecone(query, top_k=top_k)
             
             # results가 None인 경우 처리
             if results is None:
@@ -193,10 +196,10 @@ class PineconeRAGService:
             traceback.print_exc()
             return ""
     
-    def search(self, query: str, top_k: int = 5) -> list:
+    async def search(self, query: str, top_k: int = 5) -> list:
         """검색 결과 반환"""
         try:
-            results = search_pinecone(query, top_k=top_k)
+            results = await search_pinecone(query, top_k=top_k)
             
             if results and results.matches:
                 formatted_results = []
